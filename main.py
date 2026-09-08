@@ -16,10 +16,16 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "COLOQUE_SEU_TOKEN_AQUI")
 TWILIO_WHATSAPP_REMETENTE = os.getenv("TWILIO_WHATSAPP_REMETENTE", "whatsapp:+14155238886") # Número padrão do Sandbox
 MEU_WHATSAPP = os.getenv("MEU_WHATSAPP", "whatsapp:+5511999999999") # Seu número com DDI e DDD
 
-# Ligas de Elite + Ligas de Valor Estatístico
+# Ligas de Elite + Ligas de Valor (Nomes Oficiais The Odds API)
 LIGAS = [
-    "soccer_epl", "soccer_uefa_champs", "soccer_brazil_campeonato", "soccer_spain_la_liga", 
-    "soccer_netherlands_eerste_divisie", "soccer_england_championship", "soccer_japan_j_league", "soccer_usa_mls"
+    "soccer_epl",                        # Premier League
+    "soccer_uefa_champs_league",         # Champions League
+    "soccer_brazil_campeonato",          # Brasileirão Série A
+    "soccer_spain_la_liga",              # La Liga
+    "soccer_netherlands_eerste_divisie", # Holanda 2ª Divisão
+    "soccer_efl_champ",                  # Inglaterra Championship
+    "soccer_japan_j_league",             # Japão J-League
+    "soccer_usa_mls"                     # EUA MLS
 ]
 
 # ==========================================
