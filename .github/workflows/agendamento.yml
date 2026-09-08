@@ -2,9 +2,9 @@ name: Executar Robo Betano Diariamente
 
 on:
   schedule:
-    # Roda todos os dias às 08:00 no horário de Brasília (11:00 UTC)
-    - cron: '0 11 * * *'
-  workflow_dispatch: # Permite que você rode manualmente clicando num botão
+    # Roda todos os dias às 20:00 no horário de Brasília (23:00 UTC)
+    - cron: '0 23 * * *'
+  workflow_dispatch: # Permite rodar manualmente a qualquer momento
 
 jobs:
   executar:
@@ -28,5 +28,4 @@ jobs:
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           MEU_WHATSAPP: ${{ secrets.MEU_WHATSAPP }}
-          RAYAN_WHATSAPP: ${{ secrets.RAYAN_WHATSAPP }}
         run: python main.py
