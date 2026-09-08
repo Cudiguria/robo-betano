@@ -1,0 +1,32 @@
+name: Executar Robo Betano Diariamente
+
+on:
+  schedule:
+    # Roda todos os dias às 08:00 no horário de Brasília (11:00 UTC)
+    - cron: '0 11 * * *'
+  workflow_dispatch: # Permite que você rode manualmente clicando num botão
+
+jobs:
+  executar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Bibliotecas
+        run: pip install requests twilio
+
+      - name: Executar o Robô
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          MEU_WHATSAPP: ${{ secrets.MEU_WHATSAPP }}
+          RAYAN_WHATSAPP: ${{ secrets.RAYAN_WHATSAPP }}
+        run: python main.py
