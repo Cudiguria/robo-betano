@@ -12,19 +12,21 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Ligas de Elite + Ligas de Valor (Nomes Oficiais The Odds API)
+# Ampliando ligas para garantir que encontre jogos disponíveis
 LIGAS = [
     "soccer_epl",                # Premier League
     "soccer_uefa_champs_league", # Champions League
     "soccer_brazil_campeonato",  # Brasileirão Série A
     "soccer_spain_la_liga",      # La Liga
+    "soccer_italy_serie_a",      # Itália Serie A
+    "soccer_germany_bundesliga", # Alemanha Bundesliga
+    "soccer_france_ligue_one",   # França Ligue 1
     "soccer_efl_champ",          # Inglaterra Championship
-    "soccer_japan_j_league",     # Japão J-League
     "soccer_usa_mls"             # EUA MLS
 ]
 
 # ==========================================
-# 2. FUNÇÃO: BUSCAR JOGOS E ODDS DA BETANO
+# 2. FUNÇÃO: BUSCAR JOGOS E ODDS
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
@@ -35,8 +37,7 @@ def buscar_jogos_do_dia():
         params = {
             "apiKey": ODDS_API_KEY,
             "regions": "eu",
-            "markets": "h2h",
-            "bookmakers": "betano"
+            "markets": "h2h"
         }
 
         try:
@@ -44,49 +45,55 @@ def buscar_jogos_do_dia():
             resposta.raise_for_status()
             dados = resposta.json()
 
+            print(f"Liga {liga}: {len(dados)} jogos retornados pela API.")
+
             for jogo in dados:
                 data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
                 
-                # Pega jogos de hoje e dos próximos 2 dias (evita problemas com fuso horário UTC)
+                # Pega jogos de hoje e dos próximos 3 dias
                 diferenca_dias = (data_jogo - hoje_utc).days
-                if 0 <= diferenca_dias <= 2:
-                    if jogo.get('bookmakers'):
-                        odds = jogo['bookmakers'][0]['markets'][0]['outcomes']
-                        info_jogo = f"LIGA: {liga} | DATA: {data_jogo} | {jogo['home_team']} vs {jogo['away_team']} | ODDS 1X2: {odds}"
+                if 0 <= diferenca_dias <= 3:
+                    bookmakers = jogo.get('bookmakers', [])
+                    if bookmakers:
+                        # Tenta pegar a Betano, se não achar, pega a primeira disponível
+                        bm_betano = next((b for b in bookmakers if b['key'] == 'betano'), bookmakers[0])
+                        odds = bm_betano['markets'][0]['outcomes']
+                        info_jogo = f"LIGA: {liga} | DATA: {data_jogo} | {jogo['home_team']} vs {jogo['away_team']} | ODDS (Casa: {bm_betano['title']}): {odds}"
                         jogos_disponiveis.append(info_jogo)
 
         except requests.exceptions.RequestException as e:
             print(f"Erro ao buscar liga {liga}: {e}")
             continue
 
+    print(f"Total de jogos válidos encontrados no filtro: {len(jogos_disponiveis)}")
     return "\n".join(jogos_disponiveis)
+
 # ==========================================
 # 3. FUNÇÃO: PROCESSAR COM O GEMINI
 # ==========================================
 def analisar_com_ia(lista_de_jogos):
     if not lista_de_jogos:
-        return "Nenhum jogo com odds da Betano encontrado para hoje nas ligas selecionadas."
+        return "Nenhum jogo encontrado para os próximos dias nas ligas selecionadas."
 
     url_gemini = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
     prompt_master = f"""
-    Atue como meu especialista e analista estatístico de apostas esportivas na Betano.
+    Atue como meu especialista e analista estatístico de apostas esportivas.
 
     INSTRUÇÃO DE EXECUÇÃO:
-    Abaixo está a lista real de jogos de hoje com cotações (odds) da Betano. Selecione os melhores confrontos e monte uma aposta múltipla com odd mínima de 20.
+    Abaixo está a lista real de jogos de hoje/próximos dias com cotações (odds). Selecione os melhores confrontos e monte uma aposta múltipla com odd mínima de 20.
 
     DIRETRIZES TÉCNICAS:
-    1. Amostragem Recente (Últimos 10 Jogos): Fundamente nas médias e frequências.
-    2. Retrospecto e Game State: Avalie necessidade de vitória.
+    1. Amostragem Recente: Fundamente nas médias e frequências dos últimos jogos.
+    2. Retrospecto e Game State: Avalie a necessidade de vitória.
     3. Filtro de Desfalques e Elenco: Evite times com rotação massiva.
-    4. Exploração Ampla de Mercados: Busque a menor variância (Gols, Ambas Marcam, Escanteios, Cartões, Faltas).
-    5. Micro-mercados e Coerência: Lógica combinada no mesmo jogo deve fazer sentido tático.
-    6. Trava de Valor: Odd mínima de 1,45 por perna.
-    7. Gestão: Stake padrão de 0,20u.
+    4. Exploração Ampla de Mercados: Busque a menor variância.
+    5. Trava de Valor: Odd mínima de 1,45 por perna.
+    6. Gestão: Stake padrão de 0,20u.
 
     Entregue APENAS a tabela final com os jogos, mercados, odds combinadas e justificativa enxuta.
 
-    JOGOS DISPONÍVEIS HOJE:
+    JOGOS DISPONÍVEIS:
     {lista_de_jogos}
     """
 
@@ -109,7 +116,6 @@ def enviar_telegram(mensagem):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
     mensagem_formatada = mensagem[:4090] if len(mensagem) > 4096 else mensagem
 
     payload = {
@@ -123,19 +129,19 @@ def enviar_telegram(mensagem):
         print("Mensagem enviada com sucesso para o Telegram.")
     except Exception as e:
         print(f"Erro ao enviar para o Telegram: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            print(f"Detalhe do erro: {e.response.text}")
 
 # ==========================================
 # 5. EXECUÇÃO PRINCIPAL
 # ==========================================
 if __name__ == "__main__":
-    print("Buscando jogos da Betano...")
+    print("Buscando jogos...")
     grade_hoje = buscar_jogos_do_dia()
 
     print("Analisando dados com a IA e montando múltipla odd 20+...")
     bilhete_final = analisar_com_ia(grade_hoje)
 
     print("Enviando bilhete para o Telegram...")
+    enviar_telegram(bilhete_final)
+    print("Processo concluído com sucesso!")
     enviar_telegram(bilhete_final)
     print("Processo concluído com sucesso!")
