@@ -75,7 +75,7 @@ def analisar_com_ia(lista_de_jogos):
     if not lista_de_jogos:
         return "Nenhum jogo encontrado para os próximos dias nas ligas selecionadas."
 
-    url_gemini = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url_gemini = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
     prompt_master = f"""
     Atue como meu especialista e analista estatístico de apostas esportivas.
