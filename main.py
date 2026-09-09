@@ -13,9 +13,8 @@ ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 GEMINI_KEYS = [
     os.getenv("GEMINI_API_KEY_1"),
     os.getenv("GEMINI_API_KEY_2"),
-    os.getenv("GEMINI_API_KEY") # Chave principal, deixada por último como backup caso já tenha estourado
+    os.getenv("GEMINI_API_KEY") # Chave principal como backup final
 ]
-# Limpa chaves vazias ou nulas da lista
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 
 # Credenciais do Telegram
@@ -86,7 +85,7 @@ def analisar_com_ia(lista_de_jogos):
     Atue como um Analista Estatístico Sênior e Especialista em Quantitative Sports Trading na Betano.
     
     SUA MISSÃO:
-    Analisar os jogos disponíveis hoje/amanhã e, em uma ÚNICA resposta, montar TRÊS apostas múltiplas distintas cruzando microfatores táticos via pesquisa web (xG, cartões, desfalques, árbitros). As três múltiplas devem obrigatoriamente ser formadas por jogos da MESMA DATA.
+    Analisar os jogos disponíveis hoje/amanhã com a postura de um 'Advogado do Diabo' (estritamente cético e rigoroso). Em uma ÚNICA resposta, montar TRÊS apostas múltiplas distintas cruzando microfatores táticos (xG, cartões, desfalques, árbitros). REGRA DE OURO: NUNCA alucine ou invente estatísticas. Trabalhe apenas com dados reais pesquisados ou fornecidos. As três múltiplas devem obrigatoriamente ser formadas por jogos da MESMA DATA.
 
     ESTRUTURA DAS MÚLTIPLAS EXIGIDAS:
     1. 🛡️ MÚLTIPLA CONSERVADORA: Odd total máxima de 10. Foco extremo em segurança, favoritos absolutos ou under gols em jogos travados. Stake sugerida: 0,50u.
@@ -94,10 +93,37 @@ def analisar_com_ia(lista_de_jogos):
     3. 🚀 MÚLTIPLA MOONSHOT (OUSADA): Odd total mínima de 100. Foco em variância, empates em clássicos, viradas ou combinação longa de mercados. Stake sugerida: 0,05u.
 
     DIRETRIZES DE PESQUISA E FILTROS (Aplique a todas as múltiplas):
-    1. Desempenho Casa x Fora: Avalie a Força do Calendário e a métrica de "Clean Sheets".
-    2. Trava de Escanteios: Se o favorito tem alta probabilidade de abrir o placar cedo, PROÍBA cantos a favor dele (o mercado morre). Evite cantos contra defesas em blocos baixos.
-    3. Perfil do Árbitro: Exija histórico do árbitro (acima de 5.5) + descontrole das equipes para linhas de cartões altas.
-    4. Fadiga/Game State: Times que viajaram muito ou têm menos de 72h de descanso devem tender a Under Gols.
+    1. ANÁLISE DE EXPECTATIVA DE GOLS (xG) E DESEMPENHO CASA x FORA (Splits):
+       - Não olhe apenas a forma geral. Isole o desempenho do Mandante jogando EM CASA e do Visitante jogando FORA.
+       - Avalie o "Strength of Schedule" (Força do Calendário): as vitórias recentes foram contra times do topo ou da base da tabela?
+       - Defesa Sólida vs Ataque Ineficiente: Avalie a métrica de "Clean Sheets" (jogos sem sofrer gol) do mandante contra a taxa de conversão do visitante.
+    
+    2. TRAVA DE ESCANTEIOS E "GAME SCRIPT": 
+       - Se o favorito tem alta probabilidade de abrir o placar cedo, PROÍBA cantos a favor dele (o mercado morre). Evite cantos contra defesas em blocos baixos.
+    
+    3. PERFIL DO ÁRBITRO E CLIMA DA PARTIDA (Mercado de Cartões): 
+       - Para validar uma linha alta de cartões, exija cruzamento duplo obrigatório: Árbitro com média historicamente rígida (acima de 5.5) E histórico recente de descontrole disciplinar de ambas as equipes. Se a partida tender a ser de estudo e cautela, fuja dos cartões.
+       - Se não houver dados concretos do árbitro, aborte a entrada em cartões.
+    
+    4. MOTIVAÇÃO, FADIGA E FATORES EXTERNOS (Game State): 
+       - Times que viajaram muito ou têm menos de 72h de descanso devem tender a Under Gols.
+       - Retrospecto e Game State: Avalie a necessidade real de pontos de cada time e o retrospecto recente no torneio específico.
+       - Filtro de Desfalques e Elenco: Garanta a presença dos pilares táticos e evite partidas com rotação excessiva de elenco (time reserva/misto).
+    
+    5. VALOR REAL EM ODDS BAIXAS E FUGA DE "TRAP ODDS": 
+       - Odds baixas são válidas quando refletem um abismo técnico inegável (ex: elite titular em casa vs time de 2ª divisão). No entanto, descarte sumariamente odds esmagadas (como 1.05) que não compensam o risco de variância.
+    
+    6. POSTURA ANTI-ALUCINAÇÃO E RIGOR DE AMOSTRA: 
+       - Não force encaixes. Se a amostra de dados for insuficiente ou a estatística não estiver disponível, recuse o mercado. Só aprove seleções que resistam à ótica rigorosa de risco x retorno.
+       - Amostragem Recente (Últimos 10 Jogos): Fundamente cada escolha na média e na frequência dos últimos 10 jogos oficiais de cada equipe e atleta.
+    
+    7. TRANSPARÊNCIA E CITAÇÃO DE FONTES OBRIGATÓRIA (Nova Regra):
+       - Forneça a fonte exata de onde extraiu cada estatística utilizada (ex: FBref, Sofascore, imagens fornecidas, painel Betano).
+       - Apresente as médias reais (de escanteios, cartões, xG, etc.) diretamente ligadas ao argumento de validação da perna do bilhete.
+
+    8. VÁLVULA DE ESCAPE (DIAS DE GRADE RUIM E BAIXA LIQUIDEZ):
+       - Se a grade de jogos do dia for fraca ou não houver dados sólidos o suficiente para sustentar odds altas de forma estatisticamente segura, você AINDA DEVE montar as Múltiplas Premium e Moonshot para cumprir a ordem.
+       - PORÉM, é obrigatório incluir um [⚠️ AVISO DE RISCO DESTACADO] antes do bilhete, alertando o usuário de forma franca que forçar essas odds naquele dia específico é perigoso e contraria o rigor analítico.
 
     ======================================================================
     FORMATO DA RESPOSTA FINAL (PARA O TELEGRAM):
@@ -107,31 +133,40 @@ def analisar_com_ia(lista_de_jogos):
     📅 *DATA ESCOLHIDA PARA TODOS OS BILHETES:* [DD/MM/AAAA]
 
     🛡️ *BILHETE 1: CONSERVADOR (Odd Máx: 10)*
+    [⚠️ AVISO DE RISCO: Insira aqui apenas se a grade não oferecer valor seguro, ou omita esta linha se o dia for bom]
     *Stake:* 0,50u
     1. [Liga] Jogo | Mercado | Odd: X.XX
     2. [Liga] Jogo | Mercado | Odd: X.XX
     ...
     💰 *ODD TOTAL:* XX.XX
-    🔍 *Por quê?* [Justificativa em 1 frase resumida para o bilhete]
+    
+    🔍 *ANÁLISE E FONTES:* 
+    [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
 
     ---
     🎯 *BILHETE 2: PREMIUM (Odd Mín: 20)*
+    [⚠️ AVISO DE RISCO: Insira aqui se estiver forçando entradas por falta de jogos bons, ou omita se o dia for bom]
     *Stake:* 0,20u
     1. [Liga] Jogo | Mercado | Odd: X.XX
     2. [Liga] Jogo | Mercado | Odd: X.XX
     ...
     💰 *ODD TOTAL:* XX.XX
-    🔍 *Por quê?* [Justificativa em 1 frase resumida para o bilhete]
+    
+    🔍 *ANÁLISE E FONTES:* 
+    [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
 
     ---
     🚀 *BILHETE 3: MOONSHOT (Odd Mín: 100)*
+    [⚠️ AVISO DE RISCO: Insira aqui se a variância for puramente lotérica pela grade fraca, ou omita se tiver embasamento]
     *Stake:* 0,05u
     1. [Liga] Jogo | Mercado | Odd: X.XX
     2. [Liga] Jogo | Mercado | Odd: X.XX
     3. [Liga] Jogo | Mercado | Odd: X.XX
     ...
     💰 *ODD TOTAL:* XX.XX
-    🔍 *Por quê?* [Justificativa em 1 frase resumida para o bilhete]
+    
+    🔍 *ANÁLISE E FONTES:* 
+    [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
 
     JOGOS DISPONÍVEIS:
     {lista_de_jogos}
@@ -168,6 +203,8 @@ def enviar_telegram(mensagem):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    # Prevenção extra caso o relatório triplo ultrapasse o limite de caracteres do Telegram
     mensagem_formatada = mensagem[:4090] if len(mensagem) > 4096 else mensagem
 
     payload = {
