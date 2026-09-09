@@ -28,6 +28,7 @@ LIGAS = [
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
+    hoje_utc = datetime.now(timezone.utc).date()
 
     for liga in LIGAS:
         url = f"https://api.the-odds-api.com/v4/sports/{liga}/odds/"
@@ -44,11 +45,14 @@ def buscar_jogos_do_dia():
             dados = resposta.json()
 
             for jogo in dados:
-                data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-                if data_jogo.date() == datetime.now(timezone.utc).date():
+                data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
+                
+                # Pega jogos de hoje e dos próximos 2 dias (evita problemas com fuso horário UTC)
+                diferenca_dias = (data_jogo - hoje_utc).days
+                if 0 <= diferenca_dias <= 2:
                     if jogo.get('bookmakers'):
                         odds = jogo['bookmakers'][0]['markets'][0]['outcomes']
-                        info_jogo = f"LIGA: {liga} | {jogo['home_team']} vs {jogo['away_team']} | ODDS 1X2: {odds}"
+                        info_jogo = f"LIGA: {liga} | DATA: {data_jogo} | {jogo['home_team']} vs {jogo['away_team']} | ODDS 1X2: {odds}"
                         jogos_disponiveis.append(info_jogo)
 
         except requests.exceptions.RequestException as e:
@@ -56,7 +60,6 @@ def buscar_jogos_do_dia():
             continue
 
     return "\n".join(jogos_disponiveis)
-
 # ==========================================
 # 3. FUNÇÃO: PROCESSAR COM O GEMINI
 # ==========================================
