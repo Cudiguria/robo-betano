@@ -49,9 +49,9 @@ def buscar_jogos_do_dia():
             for jogo in dados:
                 data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
                 
-                # Pega jogos de hoje e dos próximos 3 dias para ter opções
+                # Pega jogos APENAS de hoje e de amanhã
                 diferenca_dias = (data_jogo - hoje_utc).days
-                if 0 <= diferenca_dias <= 3:
+                if 0 <= diferenca_dias <= 1:
                     bookmakers = jogo.get('bookmakers', [])
                     if bookmakers:
                         # Tenta pegar a Betano, se não achar, pega a primeira disponível
@@ -72,13 +72,13 @@ def buscar_jogos_do_dia():
 # ==========================================
 def analisar_com_ia(lista_de_jogos):
     if not lista_de_jogos:
-        return "Nenhum jogo encontrado para os próximos dias nas ligas selecionadas."
+        return "Nenhum jogo encontrado para hoje ou amanhã nas ligas selecionadas."
 
     prompt_master = f"""
     Atue como meu especialista e analista estatístico de apostas esportivas.
 
     INSTRUÇÃO DE EXECUÇÃO:
-    Abaixo está a lista real de jogos de hoje/próximos dias com cotações (odds) e suas respectivas DATAS. Selecione os melhores confrontos e monte uma aposta múltipla com odd mínima de 20.
+    Abaixo está a lista real de jogos de hoje e amanhã com cotações (odds) e suas respectivas DATAS. Selecione os melhores confrontos e monte uma aposta múltipla com odd mínima de 20.
 
     DIRETRIZES TÉCNICAS:
     1. Amostragem Recente: Fundamente nas médias e frequências dos últimos jogos.
