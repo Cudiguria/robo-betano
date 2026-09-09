@@ -2,6 +2,7 @@ import os
 import requests
 from datetime import datetime, timezone
 from google import genai
+from google.genai import types
 
 # ==========================================
 # 1. CONFIGURAÇÕES E CHAVES DE API
@@ -68,39 +69,82 @@ def buscar_jogos_do_dia():
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 3. FUNÇÃO: PROCESSAR COM O GEMINI
+# 3. FUNÇÃO: PROCESSAR COM O GEMINI PRO + WEB SEARCH
 # ==========================================
 def analisar_com_ia(lista_de_jogos):
     if not lista_de_jogos:
         return "Nenhum jogo encontrado para hoje ou amanhã nas ligas selecionadas."
 
     prompt_master = f"""
-    Atue como meu especialista e analista estatístico de apostas esportivas.
+    Atue como um Analista Estatístico Sênior e Especialista em Quantitative Sports Trading na Betano.
+    
+    SUA MISSÃO:
+    Analisar os jogos disponíveis hoje, realizar uma avaliação de probabilidade extremamente aprofundada (cruzando microfatores táticos e estatísticos) e montar uma aposta múltipla de alto valor esperado (EV+) com Odd Total de no mínimo 20, utilizando gestão de 0,20u.
 
-    INSTRUÇÃO DE EXECUÇÃO:
-    Abaixo está a lista real de jogos de hoje e amanhã com cotações (odds) e suas respectivas DATAS. Selecione os melhores confrontos e monte uma aposta múltipla com odd mínima de 20.
+    ======================================================================
+    PROTOCOLO DE PESQUISA PROFUNDA E FILTROS DE ALTA PRECISÃO
+    ======================================================================
+    Antes de selecionar qualquer mercado, submeta cada jogo aos seguintes crivos de pesquisa:
 
-    DIRETRIZES TÉCNICAS:
-    1. Amostragem Recente: Fundamente nas médias e frequências dos últimos jogos.
-    2. Retrospecto e Game State: Avalie a necessidade de vitória.
-    3. Filtro de Desfalques e Elenco: Evite times com rotação massiva.
-    4. Exploração Ampla de Mercados: Busque a menor variância.
-    5. Trava de Valor: Odd mínima de 1,45 por perna.
-    6. Gestão: Stake padrão de 0,20u.
-    7. REGRA DE DATA (OBRIGATÓRIO): A aposta múltipla DEVE conter APENAS jogos que acontecem EXATAMENTE na MESMA DATA. Analise as datas fornecidas e escolha um único dia para montar o bilhete inteiro. Não misture jogos de dias diferentes de forma alguma. Informe a data escolhida no topo.
+    1. ANÁLISE DE EXPECTATIVA DE GOLS (xG) E DESEMPENHO CASA x FORA (Splits)
+       - Não olhe apenas a forma geral. Isole o desempenho do Mandante jogando EM CASA e do Visitante jogando FORA.
+       - Avalie o "Strength of Schedule" (Força do Calendário): as vitórias recentes foram contra times do topo ou da base da tabela?
+       - Defesa Sólida vs Ataque Ineficiente: Avalie a métrica de "Clean Sheets" (jogos sem sofrer gol) do mandante contra a taxa de conversão do visitante.
 
-    Entregue APENAS a tabela final com os jogos, mercados, odds combinadas e justificativa enxuta.
+    2. TRAVA DE ESCANTEIOS E "GAME SCRIPT" (Armadilha de Favoritos)
+       - O volume de escanteios despenca assim que um time faz gol. Se o favorito é amplamente superior e tem alta probabilidade de abrir o placar no 1º tempo, PROÍBA apostas em "Mais de X Escanteios" a favor dele. Ele vai administrar a posse e o mercado vai morrer.
+       - Proibição contra Blocos Baixos: Contra retrancas puras, zere a exposição em cantos. Defesas fechadas cedem tiro de meta e lateral, não escanteio. Só valide cantos em jogos de transição rápida e espaço aberto.
 
-    JOGOS DISPONÍVEIS:
+    3. PERFIL DO ÁRBITRO E TRAVA DE CLÁSSICOS TENSOS (Mercado de Cartões)
+       - O juiz é o fator número 1. Não assuma que clássicos pesados garantem "Mais de 4.5 Cartões" apenas pelo peso da camisa. Jogos truncados muitas vezes geram apenas faltas táticas no meio-campo.
+       - Para validar uma linha alta de cartões, exija cruzamento duplo obrigatório: Árbitro com média historicamente rígida (acima de 5.5) E histórico recente de descontrole disciplinar de ambas as equipes. Se a partida tender a ser de estudo e cautela, fuja dos cartões.
+
+    4. MOTIVAÇÃO, FADIGA E FATORES EXTERNOS (Game State)
+       - Avalie o desgaste: O time viajou muito? Teve menos de 72 horas de descanso por causa de copas? Se sim, a probabilidade de um jogo de baixa intensidade (Under Gols) aumenta.
+       - Descarte times favoritos que já cumpriram seu objetivo na temporada e entrarão com rotação de elenco.
+
+    5. VALOR REAL EM ODDS BAIXAS E FUGA DE "TRAP ODDS"
+       - Nem toda odd baixa é armadilha. Avalie se cotações "esmagadas" refletem um abismo técnico inegável (ex: elite titular em casa x time de segunda divisão). 
+       - Se a probabilidade real beirar a certeza tática e física, odds mais baixas (abaixo de 1.45) PODEM e DEVEM ser incluídas como pilares de segurança do bilhete. Só evite odds baixas sustentadas apenas pelo nome do time (Trap Odds).
+
+    6. MONTAGEM DA MÚLTIPLA E FLEXIBILIDADE DE PERNAS
+       - Odd total mínima: 20.00.
+       - Não há um limite engessado de pernas. Evite bilhetes excessivamente longos apenas para não acumular variância gratuita, mas tenha total liberdade para estender o número de seleções caso encontre várias oportunidades altamente pertinentes e de forte convicção.
+
+    ======================================================================
+    FORMATO DA RESPOSTA (RELATÓRIO FINAL PARA WHATSAPP)
+    ======================================================================
+    
+    🎯 *MÚLTIPLA PREMIUM ODD 20+ | DADOS AVANÇADOS*
+    📊 *Stake:* 0,20u
+
+    📋 *SELEÇÕES DO BILHETE:*
+    1. [Liga] Nome do Jogo | Mercado Escolhido | Odd: X.XX
+    2. [Liga] Nome do Jogo | Mercado Escolhido | Odd: X.XX
+    3. [Liga] Nome do Jogo | Mercado Escolhido | Odd: X.XX
+    ...
+    💰 *ODD TOTAL:* XX.XX
+
+    🔍 *RELATÓRIO TÉCNICO (O "PORQUÊ" DE CADA ESCOLHA):*
+    • *Jogo 1:* [Justifique com dados de Casa/Fora, Fadiga, ou Tática]
+    • *Jogo 2:* [Justifique com base no Game Script esperado]
+    • *Jogo 3:* [Justifique pelo encaixe, Árbitro ou Desnível Técnico irrecusável]
+    ...
+
+    JOGOS DISPONÍVEIS HOJE:
     {lista_de_jogos}
     """
 
     try:
-        # Uso do SDK oficial do Google Gemini com o modelo atualizado
         client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        # Chamada com o Gemini Pro e a ferramenta de busca ativada
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-3.6-pro',
             contents=prompt_master,
+            config=types.GenerateContentConfig(
+                tools=[{"google_search": {}}]
+            )
         )
         return response.text
     except Exception as e:
@@ -139,7 +183,7 @@ if __name__ == "__main__":
     print("Buscando jogos...")
     grade_hoje = buscar_jogos_do_dia()
 
-    print("Analisando dados com a IA e montando múltipla odd 20+...")
+    print("Analisando dados com o Gemini Pro + Search e montando múltipla odd 20+...")
     bilhete_final = analisar_com_ia(grade_hoje)
 
     print("Enviando bilhete para o Telegram...")
