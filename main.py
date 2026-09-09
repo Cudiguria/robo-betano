@@ -1,35 +1,26 @@
 import os
 import requests
 from datetime import datetime, timezone
-from twilio.rest import Client
 
 # ==========================================
 # 1. CONFIGURAÇÕES E CHAVES DE API
 # ==========================================
-# Contas necessárias: the-odds-api.com, aistudio.google.com e twilio.com
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Credenciais da Twilio para o WhatsApp
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_WHATSAPP_REMETENTE = os.getenv("TWILIO_WHATSAPP_REMETENTE", "whatsapp:+17372508034")  # Número do Sandbox
-
-# Destinatários (todos vêm dos secrets do GitHub — nenhum número fica exposto no código)
-MEU_WHATSAPP = os.getenv("MEU_WHATSAPP")
-# RAYAN_WHATSAPP DESATIVADO TEMPORARIAMENTE PARA TESTE ISOLADO
-RAYAN_WHATSAPP = None
+# Credenciais do Telegram
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Ligas de Elite + Ligas de Valor (Nomes Oficiais The Odds API)
 LIGAS = [
-    "soccer_epl",                        # Premier League
-    "soccer_uefa_champs_league",         # Champions League
-    "soccer_brazil_campeonato",          # Brasileirão Série A
-    "soccer_spain_la_liga",              # La Liga
-    "soccer_netherlands_eerste_divisie", # Holanda 2ª Divisão
-    "soccer_efl_champ",                  # Inglaterra Championship
-    "soccer_japan_j_league",             # Japão J-League
-    "soccer_usa_mls"                     # EUA MLS
+    "soccer_epl",                # Premier League
+    "soccer_uefa_champs_league", # Champions League
+    "soccer_brazil_campeonato",  # Brasileirão Série A
+    "soccer_spain_la_liga",      # La Liga
+    "soccer_efl_champ",          # Inglaterra Championship
+    "soccer_japan_j_league",     # Japão J-League
+    "soccer_usa_mls"             # EUA MLS
 ]
 
 # ==========================================
@@ -107,42 +98,30 @@ def analisar_com_ia(lista_de_jogos):
         return f"Erro na análise da IA: {e}"
 
 # ==========================================
-# 4. FUNÇÃO: ENVIAR PARA O WHATSAPP (TWILIO)
+# 4. FUNÇÃO: ENVIAR PARA O TELEGRAM
 # ==========================================
-def enviar_whatsapp(mensagem):
-    # --- LINHAS DE DEBUG TEMPORÁRIAS ---
-    print(f"DEBUG - MEU_WHATSAPP='{MEU_WHATSAPP}'")
-    print(f"DEBUG - TWILIO_WHATSAPP_REMETENTE='{TWILIO_WHATSAPP_REMETENTE}'")
-    print(f"DEBUG - TWILIO_ACCOUNT_SID='{TWILIO_ACCOUNT_SID}'")
-    # --- FIM DAS LINHAS DE DEBUG ---
-
-    # Monta a lista de destinatários a partir dos secrets configurados,
-    # ignorando qualquer um que não tenha sido definido
-    destinatarios = [numero for numero in [MEU_WHATSAPP, RAYAN_WHATSAPP] if numero]
-
-    if not destinatarios:
-        print("Nenhum número de destino configurado (defina MEU_WHATSAPP e/ou RAYAN_WHATSAPP nos secrets).")
+def enviar_telegram(mensagem):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não configurados nos secrets.")
         return
 
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
-        print("TWILIO_ACCOUNT_SID ou TWILIO_AUTH_TOKEN não configurados nos secrets.")
-        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-    cliente = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    mensagem_formatada = mensagem[:4090] if len(mensagem) > 4096 else mensagem
 
-    # A API da Twilio tem um limite de 1600 caracteres por mensagem.
-    mensagem_formatada = mensagem[:1590] if len(mensagem) > 1600 else mensagem
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensagem_formatada
+    }
 
-    for numero in destinatarios:
-        try:
-            message = cliente.messages.create(
-                from_=TWILIO_WHATSAPP_REMETENTE,
-                body=mensagem_formatada,
-                to=numero
-            )
-            print(f"Mensagem enviada com sucesso para {numero}. SID: {message.sid}")
-        except Exception as e:
-            print(f"Erro ao enviar para {numero}: {e}")
+    try:
+        resposta = requests.post(url, json=payload)
+        resposta.raise_for_status()
+        print("Mensagem enviada com sucesso para o Telegram.")
+    except Exception as e:
+        print(f"Erro ao enviar para o Telegram: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Detalhe do erro: {e.response.text}")
 
 # ==========================================
 # 5. EXECUÇÃO PRINCIPAL
@@ -154,6 +133,6 @@ if __name__ == "__main__":
     print("Analisando dados com a IA e montando múltipla odd 20+...")
     bilhete_final = analisar_com_ia(grade_hoje)
 
-    print("Enviando bilhete para o WhatsApp...")
-    enviar_whatsapp(bilhete_final)
+    print("Enviando bilhete para o Telegram...")
+    enviar_telegram(bilhete_final)
     print("Processo concluído com sucesso!")
