@@ -18,7 +18,6 @@ TWILIO_WHATSAPP_REMETENTE = os.getenv("TWILIO_WHATSAPP_REMETENTE", "whatsapp:+17
 # Destinatários (todos vêm dos secrets do GitHub — nenhum número fica exposto no código)
 MEU_WHATSAPP = os.getenv("MEU_WHATSAPP")
 # RAYAN_WHATSAPP DESATIVADO TEMPORARIAMENTE PARA TESTE ISOLADO
-# RAYAN_WHATSAPP = os.getenv("RAYAN_WHATSAPP")
 RAYAN_WHATSAPP = None
 
 # Ligas de Elite + Ligas de Valor (Nomes Oficiais The Odds API)
@@ -111,6 +110,12 @@ def analisar_com_ia(lista_de_jogos):
 # 4. FUNÇÃO: ENVIAR PARA O WHATSAPP (TWILIO)
 # ==========================================
 def enviar_whatsapp(mensagem):
+    # --- LINHAS DE DEBUG TEMPORÁRIAS ---
+    print(f"DEBUG - MEU_WHATSAPP='{MEU_WHATSAPP}'")
+    print(f"DEBUG - TWILIO_WHATSAPP_REMETENTE='{TWILIO_WHATSAPP_REMETENTE}'")
+    print(f"DEBUG - TWILIO_ACCOUNT_SID='{TWILIO_ACCOUNT_SID}'")
+    # --- FIM DAS LINHAS DE DEBUG ---
+
     # Monta a lista de destinatários a partir dos secrets configurados,
     # ignorando qualquer um que não tenha sido definido
     destinatarios = [numero for numero in [MEU_WHATSAPP, RAYAN_WHATSAPP] if numero]
@@ -152,5 +157,3 @@ if __name__ == "__main__":
     print("Enviando bilhete para o WhatsApp...")
     enviar_whatsapp(bilhete_final)
     print("Processo concluído com sucesso!")
-
-
