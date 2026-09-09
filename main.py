@@ -153,3 +153,4 @@ if __name__ == "__main__":
     enviar_whatsapp(bilhete_final)
     print("Processo concluído com sucesso!")
 
+
