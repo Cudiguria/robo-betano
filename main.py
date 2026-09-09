@@ -17,7 +17,9 @@ TWILIO_WHATSAPP_REMETENTE = os.getenv("TWILIO_WHATSAPP_REMETENTE", "whatsapp:+17
 
 # Destinatários (todos vêm dos secrets do GitHub — nenhum número fica exposto no código)
 MEU_WHATSAPP = os.getenv("MEU_WHATSAPP")
-RAYAN_WHATSAPP = os.getenv("RAYAN_WHATSAPP")
+# RAYAN_WHATSAPP DESATIVADO TEMPORARIAMENTE PARA TESTE ISOLADO
+# RAYAN_WHATSAPP = os.getenv("RAYAN_WHATSAPP")
+RAYAN_WHATSAPP = None
 
 # Ligas de Elite + Ligas de Valor (Nomes Oficiais The Odds API)
 LIGAS = [
@@ -150,3 +152,4 @@ if __name__ == "__main__":
     print("Enviando bilhete para o WhatsApp...")
     enviar_whatsapp(bilhete_final)
     print("Processo concluído com sucesso!")
+
