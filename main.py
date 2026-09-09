@@ -69,7 +69,7 @@ def buscar_jogos_do_dia():
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 3. FUNÇÃO: PROCESSAR COM O GEMINI PRO + WEB SEARCH
+# 3. FUNÇÃO: PROCESSAR COM O GEMINI + WEB SEARCH
 # ==========================================
 def analisar_com_ia(lista_de_jogos):
     if not lista_de_jogos:
@@ -138,9 +138,9 @@ def analisar_com_ia(lista_de_jogos):
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         
-        # Chamada com o Gemini Pro e a ferramenta de busca ativada
+        # O modelo retorna ao Flash, mas mantém a ferramenta de busca ativada
         response = client.models.generate_content(
-            model='gemini-3.6-pro',
+            model='gemini-3.6-flash',
             contents=prompt_master,
             config=types.GenerateContentConfig(
                 tools=[{"google_search": {}}]
@@ -160,7 +160,6 @@ def enviar_telegram(mensagem):
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
-    # Respeita o limite de tamanho da mensagem do Telegram
     mensagem_formatada = mensagem[:4090] if len(mensagem) > 4096 else mensagem
 
     payload = {
@@ -183,7 +182,7 @@ if __name__ == "__main__":
     print("Buscando jogos...")
     grade_hoje = buscar_jogos_do_dia()
 
-    print("Analisando dados com o Gemini Pro + Search e montando múltipla odd 20+...")
+    print("Analisando dados com o Gemini Flash + Search e montando múltipla odd 20+...")
     bilhete_final = analisar_com_ia(grade_hoje)
 
     print("Enviando bilhete para o Telegram...")
