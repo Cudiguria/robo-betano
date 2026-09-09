@@ -49,7 +49,7 @@ def buscar_jogos_do_dia():
             for jogo in dados:
                 data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
                 
-                # Pega jogos de hoje e dos próximos 3 dias
+                # Pega jogos de hoje e dos próximos 3 dias para ter opções
                 diferenca_dias = (data_jogo - hoje_utc).days
                 if 0 <= diferenca_dias <= 3:
                     bookmakers = jogo.get('bookmakers', [])
@@ -78,7 +78,7 @@ def analisar_com_ia(lista_de_jogos):
     Atue como meu especialista e analista estatístico de apostas esportivas.
 
     INSTRUÇÃO DE EXECUÇÃO:
-    Abaixo está a lista real de jogos de hoje/próximos dias com cotações (odds). Selecione os melhores confrontos e monte uma aposta múltipla com odd mínima de 20.
+    Abaixo está a lista real de jogos de hoje/próximos dias com cotações (odds) e suas respectivas DATAS. Selecione os melhores confrontos e monte uma aposta múltipla com odd mínima de 20.
 
     DIRETRIZES TÉCNICAS:
     1. Amostragem Recente: Fundamente nas médias e frequências dos últimos jogos.
@@ -87,6 +87,7 @@ def analisar_com_ia(lista_de_jogos):
     4. Exploração Ampla de Mercados: Busque a menor variância.
     5. Trava de Valor: Odd mínima de 1,45 por perna.
     6. Gestão: Stake padrão de 0,20u.
+    7. REGRA DE DATA (OBRIGATÓRIO): A aposta múltipla DEVE conter APENAS jogos que acontecem EXATAMENTE na MESMA DATA. Analise as datas fornecidas e escolha um único dia para montar o bilhete inteiro. Não misture jogos de dias diferentes de forma alguma. Informe a data escolhida no topo.
 
     Entregue APENAS a tabela final com os jogos, mercados, odds combinadas e justificativa enxuta.
 
@@ -120,7 +121,8 @@ def enviar_telegram(mensagem):
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensagem_formatada
+        "text": mensagem_formatada,
+        "parse_mode": "Markdown"
     }
 
     try:
