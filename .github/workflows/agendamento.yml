@@ -2,7 +2,7 @@ name: Executar Robo Betano Diariamente
 
 on:
   schedule:
-    # Roda todos os dias às 20:00 no horário de Brasília (23:00 UTC)
+    # Roda todo dia às 20h00 BRT (23h00 UTC)
     - cron: '0 23 * * *'
   workflow_dispatch:
 
@@ -25,6 +25,8 @@ jobs:
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
