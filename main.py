@@ -1,6 +1,7 @@
 import os
 import requests
 from datetime import datetime, timezone
+from google import genai
 
 # ==========================================
 # 1. CONFIGURAÇÕES E CHAVES DE API
@@ -12,7 +13,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Ampliando ligas para garantir que encontre jogos disponíveis
+# Ampliando ligas para garantir jogos disponíveis em qualquer dia
 LIGAS = [
     "soccer_epl",                # Premier League
     "soccer_uefa_champs_league", # Champions League
@@ -45,8 +46,6 @@ def buscar_jogos_do_dia():
             resposta.raise_for_status()
             dados = resposta.json()
 
-            print(f"Liga {liga}: {len(dados)} jogos retornados pela API.")
-
             for jogo in dados:
                 data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
                 
@@ -65,7 +64,7 @@ def buscar_jogos_do_dia():
             print(f"Erro ao buscar liga {liga}: {e}")
             continue
 
-    print(f"Total de jogos válidos encontrados no filtro: {len(jogos_disponiveis)}")
+    print(f"Total de jogos encontrados: {len(jogos_disponiveis)}")
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
@@ -74,8 +73,6 @@ def buscar_jogos_do_dia():
 def analisar_com_ia(lista_de_jogos):
     if not lista_de_jogos:
         return "Nenhum jogo encontrado para os próximos dias nas ligas selecionadas."
-
-    url_gemini = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
     prompt_master = f"""
     Atue como meu especialista e analista estatístico de apostas esportivas.
@@ -97,13 +94,14 @@ def analisar_com_ia(lista_de_jogos):
     {lista_de_jogos}
     """
 
-    headers = {"Content-Type": "application/json"}
-    payload = {"contents": [{"parts": [{"text": prompt_master}]}]}
-
     try:
-        resposta = requests.post(url_gemini, headers=headers, json=payload)
-        resposta.raise_for_status()
-        return resposta.json()['candidates'][0]['content']['parts'][0]['text']
+        # Uso do SDK oficial do Google Gemini
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt_master,
+        )
+        return response.text
     except Exception as e:
         return f"Erro na análise da IA: {e}"
 
@@ -116,6 +114,8 @@ def enviar_telegram(mensagem):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    # Respeita o limite de tamanho da mensagem do Telegram
     mensagem_formatada = mensagem[:4090] if len(mensagem) > 4096 else mensagem
 
     payload = {
@@ -141,7 +141,5 @@ if __name__ == "__main__":
     bilhete_final = analisar_com_ia(grade_hoje)
 
     print("Enviando bilhete para o Telegram...")
-    enviar_telegram(bilhete_final)
-    print("Processo concluído com sucesso!")
     enviar_telegram(bilhete_final)
     print("Processo concluído com sucesso!")
