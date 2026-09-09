@@ -95,10 +95,10 @@ def analisar_com_ia(lista_de_jogos):
     """
 
     try:
-        # Uso do SDK oficial do Google Gemini
+        # Uso do SDK oficial do Google Gemini com o modelo estável
         client = genai.Client(api_key=GEMINI_API_KEY)
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-1.5-flash',
             contents=prompt_master,
         )
         return response.text
