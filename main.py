@@ -18,7 +18,7 @@ GEMINI_KEYS = [
 ]
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 
-# Credenciais do Telegram (CORRIGIDO PARA TELEGRAM_TOKEN)
+# Credenciais do Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -76,9 +76,9 @@ def buscar_jogos_do_dia():
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 3. FUNÇÃO: PROCESSAR UM BILHETE POR VEZ COM O GEMINI
+# 3. FUNÇÃO: PROCESSAR TODOS OS BILHETES EM UMA CHAMADA
 # ==========================================
-def analisar_com_ia(lista_de_jogos, perfil_descricao):
+def analisar_com_ia_unificada(lista_de_jogos):
     if not lista_de_jogos:
         return "Nenhum jogo encontrado para hoje ou amanhã nas ligas selecionadas."
 
@@ -86,13 +86,14 @@ def analisar_com_ia(lista_de_jogos, perfil_descricao):
     Atue como um Analista Estatístico Sênior e Especialista em Quantitative Sports Trading na Betano.
     
     SUA MISSÃO:
-    Analisar os jogos disponíveis hoje/amanhã com a postura de um 'Advogado do Diabo' (estritamente cético e rigoroso). Em uma ÚNICA resposta, montar APENAS UMA aposta múltipla focada estritamente no seguinte perfil:
-    
-    {perfil_descricao}
-    
-    REGRA DE OURO: NUNCA alucine ou invente estatísticas. Trabalhe apenas com dados reais pesquisados ou fornecidos. As seleções devem obrigatoriamente pertencer à MESMA DATA.
+    Analisar os jogos disponíveis hoje/amanhã com a postura de um 'Advogado do Diabo' (estritamente cético e rigoroso). Em uma ÚNICA resposta, montar TRÊS apostas múltiplas distintas cruzando microfatores táticos (xG, cartões, desfalques, árbitros). REGRA DE OURO: NUNCA alucine ou invente estatísticas. Trabalhe apenas com dados reais pesquisados ou fornecidos. As três múltiplas devem obrigatoriamente ser formadas por jogos da MESMA DATA.
 
-    DIRETRIZES DE PESQUISA E FILTROS:
+    ESTRUTURA DAS MÚLTIPLAS EXIGIDAS:
+    1. 🛡️ MÚLTIPLA CONSERVADORA: Odd total máxima de 10. Foco extremo em segurança, favoritos absolutos ou under gols em jogos travados. Stake sugerida: 0,50u.
+    2. 🎯 MÚLTIPLA PREMIUM (PADRÃO): Odd total mínima de 20. Foco em EV+ equilibrado, mercados de cartões, cantos e duplas chances. Stake sugerida: 0,20u.
+    3. 🚀 MÚLTIPLA MOONSHOT (OUSADA): Odd total mínima de 100. Foco em variância, empates em clássicos, viradas ou combinação longa de mercados. Stake sugerida: 0,05u.
+
+    DIRETRIZES DE PESQUISA E FILTROS (Aplique a todas as múltiplas):
     1. ANÁLISE DE EXPECTATIVA DE GOLS (xG) E DESEMPENHO CASA x FORA (Splits):
        - Não olhe apenas a forma geral. Isole o desempenho do Mandante jogando EM CASA e do Visitante jogando FORA.
        - Avalie o "Strength of Schedule" (Força do Calendário): as vitórias recentes foram contra times do topo ou da base da tabela?
@@ -117,28 +118,58 @@ def analisar_com_ia(lista_de_jogos, perfil_descricao):
        - Não force encaixes. Se a amostra de dados for insuficiente ou a estatística não estiver disponível, recuse o mercado. Só aprove seleções que resistam à ótica rigorosa de risco x retorno.
        - Amostragem Recente (Últimos 10 Jogos): Fundamente cada escolha na média e na frequência dos últimos 10 jogos oficiais de cada equipe e atleta.
     
-    7. TRANSPARÊNCIA E CITAÇÃO DE FONTES OBRIGATÓRIA:
-       - Forneça a fonte exata de onde extraiu cada estatística utilizada (ex: FBref, Sofascore).
+    7. TRANSPARÊNCIA E CITAÇÃO DE FONTES OBRIGATÓRIA (Nova Regra):
+       - Forneça a fonte exata de onde extraiu cada estatística utilizada (ex: FBref, Sofascore, imagens fornecidas, painel Betano).
        - Apresente as médias reais (de escanteios, cartões, xG, etc.) diretamente ligadas ao argumento de validação da perna do bilhete.
 
     8. VÁLVULA DE ESCAPE (DIAS DE GRADE RUIM E BAIXA LIQUIDEZ):
-       - Se a grade de jogos for fraca ou não houver dados sólidos o suficiente para sustentar odds, você AINDA DEVE montar a múltipla para cumprir a ordem.
-       - PORÉM, é obrigatório incluir um [⚠️ AVISO DE RISCO DESTACADO] antes do bilhete, alertando que forçar essas odds naquele dia específico é perigoso.
+       - Se a grade de jogos do dia for fraca ou não houver dados sólidos o suficiente para sustentar odds altas de forma estatisticamente segura, você AINDA DEVE montar as Múltiplas Premium e Moonshot para cumprir a ordem.
+       - PORÉM, é obrigatório incluir um [⚠️ AVISO DE RISCO DESTACADO] antes do bilhete, alertando o usuário de forma franca que forçar essas odds naquele dia específico é perigoso e contraria o rigor analítico.
 
     ======================================================================
     FORMATO DA RESPOSTA FINAL (PARA O TELEGRAM):
     ======================================================================
-    📅 *DATA ESCOLHIDA PARA O BILHETE:* [DD/MM/AAAA]
+    Monte os três bilhetes na mesma resposta, separando CADA UM DELES estritamente pelo marcador "==========" em uma linha isolada.
 
-    [⚠️ AVISO DE RISCO: Insira aqui se a grade for fraca, ou omita se o dia for bom]
-    *Stake:* [Preencha com a sugerida no perfil]
+    📅 *DATA ESCOLHIDA PARA TODOS OS BILHETES:* [DD/MM/AAAA]
+
+    🔥 BILHETE 1: CONSERVADOR (Odd Máx: 10) 🔥
+    [⚠️ AVISO DE RISCO: Insira aqui apenas se a grade não oferecer valor seguro, ou omita esta linha se o dia for bom]
+    *Stake:* 0,50u
     1. [Liga] Jogo | Mercado | Odd: X.XX
     2. [Liga] Jogo | Mercado | Odd: X.XX
     ...
     💰 *ODD TOTAL:* XX.XX
     
     🔍 *ANÁLISE E FONTES:* 
-    [Escreva um parágrafo completo explicando a estratégia tática, cruzamento de métricas, as médias obtidas e citando as fontes consultadas de cada dado.]
+    [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
+
+    ==========
+
+    🔥 BILHETE 2: PREMIUM (Odd Mín: 20) 🔥
+    [⚠️ AVISO DE RISCO: Insira aqui se estiver forçando entradas por falta de jogos bons, ou omita se o dia for bom]
+    *Stake:* 0,20u
+    1. [Liga] Jogo | Mercado | Odd: X.XX
+    2. [Liga] Jogo | Mercado | Odd: X.XX
+    ...
+    💰 *ODD TOTAL:* XX.XX
+    
+    🔍 *ANÁLISE E FONTES:* 
+    [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
+
+    ==========
+
+    🔥 BILHETE 3: MOONSHOT (Odd Mín: 100) 🔥
+    [⚠️ AVISO DE RISCO: Insira aqui se a variância for puramente lotérica pela grade fraca, ou omita se tiver embasamento]
+    *Stake:* 0,05u
+    1. [Liga] Jogo | Mercado | Odd: X.XX
+    2. [Liga] Jogo | Mercado | Odd: X.XX
+    3. [Liga] Jogo | Mercado | Odd: X.XX
+    ...
+    💰 *ODD TOTAL:* XX.XX
+    
+    🔍 *ANÁLISE E FONTES:* 
+    [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
 
     ======================================================================
     CHECKLIST DE VERIFICAÇÃO OBRIGATÓRIA (FAÇA ANTES DE ENVIAR)
@@ -162,7 +193,7 @@ def analisar_com_ia(lista_de_jogos, perfil_descricao):
             print(f"Tentando conexão com o Gemini usando a Chave #{i+1}...")
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model='gemini-2.0-flash',
                 contents=prompt_master,
                 config=types.GenerateContentConfig(
                     tools=[{"google_search": {}}]
@@ -189,7 +220,6 @@ def enviar_telegram(mensagem):
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
-    # Prevenção extra caso o relatório ultrapasse o limite de caracteres do Telegram
     mensagem_formatada = mensagem[:4090] if len(mensagem) > 4096 else mensagem
 
     payload = {
@@ -216,38 +246,22 @@ if __name__ == "__main__":
         print("Nenhum jogo encontrado. Encerrando execução.")
         exit()
 
-    perfis_de_aposta = [
-        {
-            "nome": "CONSERVADORA", 
-            "descricao": "Múltipla CONSERVADORA (Odd total máxima de 10). Foco extremo em segurança, favoritos absolutos ou under gols em jogos travados. Stake sugerida: 0,50u."
-        },
-        {
-            "nome": "PREMIUM", 
-            "descricao": "Múltipla PREMIUM (PADRÃO) (Odd total mínima de 20). Foco em EV+ equilibrado, mercados de cartões, cantos e duplas chances. Stake sugerida: 0,20u."
-        },
-        {
-            "nome": "MOONSHOT", 
-            "descricao": "Múltipla MOONSHOT (OUSADA) (Odd total mínima de 100). Foco em variância, empates em clássicos, viradas ou combinação longa de mercados. Stake sugerida: 0,05u."
-        }
-    ]
-
-    print("Iniciando geração sequencial das múltiplas...")
+    print("Iniciando análise única com o Gemini 2.0 Flash...")
+    resposta_ia = analisar_com_ia_unificada(grade_hoje)
     
-    for perfil in perfis_de_aposta:
-        print(f"\n--- Gerando bilhete: {perfil['nome']} ---")
+    if "Erro crítico" in resposta_ia or "Erro na análise" in resposta_ia:
+        print("Falha ao gerar os bilhetes. Enviando alerta de erro.")
+        enviar_telegram(f"❌ {resposta_ia}")
+    else:
+        # Fatiando a resposta única nos 3 bilhetes separados usando o delimitador
+        bilhetes = resposta_ia.split("==========")
         
-        bilhete = analisar_com_ia(grade_hoje, perfil["descricao"])
-        
-        if "Erro crítico" not in bilhete and "Erro na análise" not in bilhete:
-            mensagem_telegram = f"🔥 BILHETE {perfil['nome']} 🔥\n\n{bilhete}"
-            print(f"Enviando bilhete {perfil['nome']} para o Telegram...")
-            enviar_telegram(mensagem_telegram)
-        else:
-            print(f"Falha ao gerar o bilhete {perfil['nome']}. Enviando alerta de erro.")
-            enviar_telegram(f"❌ Falha ao gerar o bilhete {perfil['nome']}:\n{bilhete}")
-        
-        # Pausa de 15 segundos para proteger o limite de RPM da API gratuita
-        print("Pausando 15 segundos para resfriamento da API...")
-        time.sleep(15)
+        for bilhete in bilhetes:
+            bilhete_limpo = bilhete.strip()
+            if bilhete_limpo:
+                print("Enviando bilhete fatiado para o Telegram...")
+                enviar_telegram(bilhete_limpo)
+                # Pausa curta para não ultrapassar limites de envio do Telegram
+                time.sleep(3)
         
     print("\nProcesso concluído com sucesso!")
