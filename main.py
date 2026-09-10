@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import requests
 from datetime import datetime, timezone
@@ -10,7 +11,7 @@ from google.genai import types
 # ==========================================
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
-# Rotação Exata alinhada com os Secrets do seu GitHub:
+# Rotação alinhada com os Secrets do seu GitHub (6 chaves no total)
 GEMINI_KEYS = [
     os.getenv("GEMINI_API_KEY"),
     os.getenv("GEMINI_API_KEY_1"),
@@ -19,24 +20,21 @@ GEMINI_KEYS = [
     os.getenv("GEMINI_API_KEY_4"),
     os.getenv("GEMINI_API_KEY_5")
 ]
-# Remove entradas vazias ou Nulas automaticamente
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 
-# Credenciais do Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Ligas otimizadas para cobertura diária sem estourar cota de busca
 LIGAS = [
-    "soccer_brazil_campeonato",  # Brasileirão Série A
-    "soccer_spain_la_liga",      # La Liga
-    "soccer_italy_serie_a",      # Serie A Italiana
-    "soccer_epl",                # Premier League
-    "soccer_uefa_champs_league"  # UEFA Champions League
+    "soccer_brazil_campeonato",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_epl",
+    "soccer_uefa_champs_league"
 ]
 
 # ==========================================
-# 2. FUNÇÃO: BUSCAR JOGOS E ODDS
+# 2. FUNÇÃO: BUSCAR JOGOS E ODDS (INALTERADA)
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
@@ -44,21 +42,13 @@ def buscar_jogos_do_dia():
 
     for liga in LIGAS:
         url = f"https://api.the-odds-api.com/v4/sports/{liga}/odds/"
-        params = {
-            "apiKey": ODDS_API_KEY,
-            "regions": "eu",
-            "markets": "h2h"
-        }
-
+        params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h"}
         try:
             resposta = requests.get(url, params=params)
             resposta.raise_for_status()
             dados = resposta.json()
-
             for jogo in dados:
                 data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
-                
-                # Pega jogos APENAS de hoje e de amanhã (0 a 1 dia de diferença)
                 diferenca_dias = (data_jogo - hoje_utc).days
                 if 0 <= diferenca_dias <= 1:
                     bookmakers = jogo.get('bookmakers', [])
@@ -67,7 +57,6 @@ def buscar_jogos_do_dia():
                         odds = bm_betano['markets'][0]['outcomes']
                         info_jogo = f"LIGA: {liga} | DATA: {data_jogo} | {jogo['home_team']} vs {jogo['away_team']} | ODDS (Casa: {bm_betano['title']}): {odds}"
                         jogos_disponiveis.append(info_jogo)
-
         except requests.exceptions.RequestException as e:
             print(f"Erro ao buscar liga {liga}: {e}")
             continue
@@ -76,7 +65,9 @@ def buscar_jogos_do_dia():
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 3. FUNÇÃO: PROCESSAR TODOS OS BILHETES EM UMA CHAMADA UNIFICADA
+# 3. FUNÇÃO: PROCESSAR TODOS OS BILHETES (CORRIGIDA)
+#    Agora tenta TODAS as chaves pra QUALQUER erro,
+#    não só 429 — e só desiste depois de esgotar as 6.
 # ==========================================
 def analisar_com_ia_unificada(lista_de_jogos):
     if not lista_de_jogos:
@@ -84,7 +75,7 @@ def analisar_com_ia_unificada(lista_de_jogos):
 
     prompt_master = f"""
     Atue como um Analista Estatístico Sênior e Especialista em Quantitative Sports Trading na Betano.
-    
+
     SUA MISSÃO:
     Analisar os jogos disponíveis hoje/amanhã com a postura de um 'Advogado do Diabo' (estritamente cético e rigoroso). Em uma ÚNICA resposta, montar TRÊS apostas múltiplas distintas cruzando microfatores táticos (xG, cartões, desfalques, árbitros). REGRA DE OURO: NUNCA alucine ou invente estatísticas. Trabalhe apenas com dados reais pesquisados ou fornecidos. As três múltiplas devem obrigatoriamente ser formadas por jogos da MESMA DATA.
 
@@ -98,26 +89,26 @@ def analisar_com_ia_unificada(lista_de_jogos):
        - Não olhe apenas a forma geral. Isole o desempenho do Mandante jogando EM CASA e do Visitante jogando FORA.
        - Avalie o "Strength of Schedule" (Força do Calendário): as vitórias recentes foram contra times do topo ou da base da tabela?
        - Defesa Sólida vs Ataque Ineficiente: Avalie a métrica de "Clean Sheets" (jogos sem sofrer gol) do mandante contra a taxa de conversão do visitante.
-    
-    2. TRAVA DE ESCANTEIOS E "GAME SCRIPT": 
+
+    2. TRAVA DE ESCANTEIOS E "GAME SCRIPT":
        - Se o favorito tem alta probabilidade de abrir o placar cedo, PROÍBA cantos a favor dele (o mercado morre). Evite cantos contra defesas em blocos baixos.
-    
-    3. PERFIL DO ÁRBITRO E CLIMA DA PARTIDA (Mercado de Cartões): 
+
+    3. PERFIL DO ÁRBITRO E CLIMA DA PARTIDA (Mercado de Cartões):
        - Para validar uma linha alta de cartões, exija cruzamento duplo obrigatório: Árbitro com média historicamente rígida (acima de 5.5) E histórico recente de descontrole disciplinar de ambas as equipes. Se a partida tender a ser de estudo e cautela, fuja dos cartões.
        - Se não houver dados concretos do árbitro, aborte a entrada em cartões.
-    
-    4. MOTIVAÇÃO, FADIGA E FATORES EXTERNOS (Game State): 
+
+    4. MOTIVAÇÃO, FADIGA E FATORES EXTERNOS (Game State):
        - Times que viajaram muito ou têm menos de 72h de descanso devem tender a Under Gols.
        - Retrospecto e Game State: Avalie a necessidade real de pontos de cada time e o retrospecto recente no torneio específico.
        - Filtro de Desfalques e Elenco: Garanta a presença dos pilares táticos e evite partidas com rotação excessiva de elenco (time reserva/misto).
-    
-    5. VALOR REAL EM ODDS BAIXAS E FUGA DE "TRAP ODDS": 
+
+    5. VALOR REAL EM ODDS BAIXAS E FUGA DE "TRAP ODDS":
        - Odds baixas são válidas quando refletem um abismo técnico inegável (ex: elite titular em casa vs time de 2ª divisão). No entanto, descarte sumariamente odds esmagadas (como 1.05) que não compensam o risco de variância.
-    
-    6. POSTURA ANTI-ALUCINAÇÃO E RIGOR DE AMOSTRA: 
+
+    6. POSTURA ANTI-ALUCINAÇÃO E RIGOR DE AMOSTRA:
        - Não force encaixes. Se a amostra de dados for insuficiente ou a estatística não estiver disponível, recuse o mercado. Só aprove seleções que resistam à ótica rigorosa de risco x retorno.
        - Amostragem Recente (Últimos 10 Jogos): Fundamente cada escolha na média e na frequência dos últimos 10 jogos oficiais de cada equipe e atleta.
-    
+
     7. TRANSPARÊNCIA E CITAÇÃO DE FONTES OBRIGATÓRIA:
        - Forneça a fonte exata de onde extraiu cada estatística utilizada (ex: FBref, Sofascore, imagens fornecidas, painel Betano).
        - Apresente as médias reais (de escanteios, cartões, xG, etc.) diretamente ligadas ao argumento de validação da perna do bilhete.
@@ -140,8 +131,8 @@ def analisar_com_ia_unificada(lista_de_jogos):
     2. [Liga] Jogo | Mercado | Odd: X.XX
     ...
     💰 *ODD TOTAL:* XX.XX
-    
-    🔍 *ANÁLISE E FONTES:* 
+
+    🔍 *ANÁLISE E FONTES:*
     [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
 
     ==========
@@ -153,8 +144,8 @@ def analisar_com_ia_unificada(lista_de_jogos):
     2. [Liga] Jogo | Mercado | Odd: X.XX
     ...
     💰 *ODD TOTAL:* XX.XX
-    
-    🔍 *ANÁLISE E FONTES:* 
+
+    🔍 *ANÁLISE E FONTES:*
     [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
 
     ==========
@@ -167,8 +158,8 @@ def analisar_com_ia_unificada(lista_de_jogos):
     3. [Liga] Jogo | Mercado | Odd: X.XX
     ...
     💰 *ODD TOTAL:* XX.XX
-    
-    🔍 *ANÁLISE E FONTES:* 
+
+    🔍 *ANÁLISE E FONTES:*
     [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
 
     ======================================================================
@@ -188,6 +179,7 @@ def analisar_com_ia_unificada(lista_de_jogos):
     {lista_de_jogos}
     """
 
+    ultimo_erro = None
     for i, key in enumerate(GEMINI_KEYS):
         try:
             print(f"Tentando conexão com o Gemini usando a Chave #{i+1}...")
@@ -199,19 +191,22 @@ def analisar_com_ia_unificada(lista_de_jogos):
                     tools=[{"google_search": {}}]
                 )
             )
+            print(f"Sucesso com a Chave #{i+1}.")
             return response.text
         except Exception as e:
+            # CORREÇÃO: agora tenta a PRÓXIMA chave pra QUALQUER tipo de erro,
+            # não só 429 — algumas contas podem não ter acesso ao modelo,
+            # ter chave inválida, etc. Só desiste depois de esgotar todas.
             print(f"Erro com a Chave #{i+1}: {e}")
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                print("Limite de cota atingido nesta chave. Tentando a próxima...")
-                continue
-            else:
-                return f"Erro na análise da IA: {e}"
+            ultimo_erro = e
+            continue
 
-    return "Erro crítico: Todas as chaves da API do Gemini atingiram o limite de cota."
+    return f"Erro crítico: Todas as {len(GEMINI_KEYS)} chaves falharam. Último erro: {ultimo_erro}"
 
 # ==========================================
-# 4. FUNÇÃO: ENVIAR PARA O TELEGRAM
+# 4. FUNÇÃO: ENVIAR PARA O TELEGRAM (CORRIGIDA)
+#    Se o Markdown falhar (texto com * ou [ desbalanceado),
+#    tenta de novo em texto puro em vez de perder a mensagem.
 # ==========================================
 def enviar_telegram(mensagem):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -219,21 +214,25 @@ def enviar_telegram(mensagem):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
     mensagem_formatada = mensagem[:4090] if len(mensagem) > 4096 else mensagem
 
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensagem_formatada,
-        "parse_mode": "Markdown"
-    }
-
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mensagem_formatada, "parse_mode": "Markdown"}
     try:
         resposta = requests.post(url, json=payload)
         resposta.raise_for_status()
-        print("Mensagem enviada com sucesso para o Telegram.")
-    except Exception as e:
-        print(f"Erro ao enviar para o Telegram: {e}")
+        print("Mensagem enviada com sucesso (Markdown).")
+        return
+    except requests.exceptions.RequestException as e:
+        print(f"Falha ao enviar com Markdown ({e}). Tentando de novo em texto puro...")
+
+    # Fallback: manda sem formatação, pra garantir que a mensagem chegue de qualquer jeito
+    payload_sem_formato = {"chat_id": TELEGRAM_CHAT_ID, "text": mensagem_formatada}
+    try:
+        resposta = requests.post(url, json=payload_sem_formato)
+        resposta.raise_for_status()
+        print("Mensagem enviada com sucesso (texto puro, sem formatação).")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao enviar para o Telegram mesmo em texto puro: {e}")
 
 # ==========================================
 # 5. EXECUÇÃO PRINCIPAL
@@ -241,26 +240,26 @@ def enviar_telegram(mensagem):
 if __name__ == "__main__":
     print("Buscando jogos...")
     grade_hoje = buscar_jogos_do_dia()
-    
+
     if not grade_hoje:
         print("Nenhum jogo encontrado. Encerrando execução.")
         exit()
 
     print("Iniciando análise única com o Gemini 3.6 Flash...")
     resposta_ia = analisar_com_ia_unificada(grade_hoje)
-    
+
     if "Erro crítico" in resposta_ia or "Erro na análise" in resposta_ia:
         print("Falha ao gerar os bilhetes. Enviando alerta de erro.")
         enviar_telegram(f"❌ {resposta_ia}")
     else:
-        # Fatiando a resposta única nos 3 bilhetes separados usando o delimitador
-        bilhetes = resposta_ia.split("==========")
-        
+        # Split mais tolerante: aceita variações de quantidade de "=" e espaços ao redor
+        bilhetes = re.split(r'\n\s*=+\s*\n', resposta_ia)
+
         for bilhete in bilhetes:
             bilhete_limpo = bilhete.strip()
             if bilhete_limpo:
                 print("Enviando bilhete fatiado para o Telegram...")
                 enviar_telegram(bilhete_limpo)
                 time.sleep(3)
-        
+
     print("\nProcesso concluído com sucesso!")
