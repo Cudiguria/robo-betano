@@ -10,19 +10,23 @@ from google.genai import types
 # ==========================================
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
-# Sistema de Rotação de Múltiplas Chaves do Gemini (Proteção contra Erro 429)
+# Rotação Exata alinhada com os Secrets do seu GitHub:
 GEMINI_KEYS = [
+    os.getenv("GEMINI_API_KEY"),
     os.getenv("GEMINI_API_KEY_1"),
     os.getenv("GEMINI_API_KEY_2"),
-    os.getenv("GEMINI_API_KEY") # Chave principal como backup final
+    os.getenv("GEMINI_API_KEY_3"),
+    os.getenv("GEMINI_API_KEY_4"),
+    os.getenv("GEMINI_API_KEY_5")
 ]
+# Remove entradas vazias ou Nulas automaticamente
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 
 # Credenciais do Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Ligas otimizadas (Foco em cobertura diária e redução de cota de pesquisa)
+# Ligas otimizadas para cobertura diária sem estourar cota de busca
 LIGAS = [
     "soccer_brazil_campeonato",  # Brasileirão Série A
     "soccer_spain_la_liga",      # La Liga
@@ -257,7 +261,6 @@ if __name__ == "__main__":
             if bilhete_limpo:
                 print("Enviando bilhete fatiado para o Telegram...")
                 enviar_telegram(bilhete_limpo)
-                # Pausa de 3 segundos entre as mensagens para evitar travamento da API do Telegram
                 time.sleep(3)
         
     print("\nProcesso concluído com sucesso!")
