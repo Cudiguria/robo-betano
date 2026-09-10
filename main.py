@@ -25,6 +25,9 @@ GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Chave gratuita do football-data.org (crie a conta em football-data.org/client/register)
+FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
+
 LIGAS = [
     "soccer_brazil_campeonato",
     "soccer_spain_la_liga",
@@ -33,14 +36,75 @@ LIGAS = [
     "soccer_uefa_champs_league"
 ]
 
+# Mapa das suas ligas (Odds API) pro código de competição do football-data.org
+# As 5 ligas que você usa estão TODAS cobertas pelo plano gratuito.
+MAPA_COMPETICOES_FOOTBALL_DATA = {
+    "soccer_brazil_campeonato": "BSA",
+    "soccer_spain_la_liga": "PD",
+    "soccer_italy_serie_a": "SA",
+    "soccer_epl": "PL",
+    "soccer_uefa_champs_league": "CL",
+}
+
 # ==========================================
-# 2. FUNÇÃO: BUSCAR JOGOS E ODDS (INALTERADA)
+# 2. FUNÇÃO: BUSCAR TABELA/FORMA REAL (football-data.org)
+#    Dado verificado — reduz a dependência do Gemini "adivinhar"
+#    posição/forma via busca de texto.
+# ==========================================
+def buscar_tabela_competicao(codigo_competicao):
+    if not FOOTBALL_DATA_API_KEY or not codigo_competicao:
+        return {}
+
+    url = f"https://api.football-data.org/v4/competitions/{codigo_competicao}/standings"
+    headers = {"X-Auth-Token": FOOTBALL_DATA_API_KEY}
+
+    try:
+        resposta = requests.get(url, headers=headers, timeout=10)
+        resposta.raise_for_status()
+        dados = resposta.json()
+
+        tabela = {}
+        for grupo in dados.get("standings", []):
+            if grupo.get("type") != "TOTAL":
+                continue
+            for time in grupo.get("table", []):
+                nome = time["team"]["name"]
+                forma = time.get("form") or "sem histórico recente"
+                resumo = (
+                    f"{time['position']}º lugar, {time['points']}pts "
+                    f"({time['won']}V-{time['draw']}E-{time['lost']}D), "
+                    f"saldo de gols {time['goalDifference']}, forma recente: {forma}"
+                )
+                tabela[nome.lower()] = resumo
+        return tabela
+    except requests.exceptions.RequestException as e:
+        print(f"Aviso: não consegui buscar a tabela de {codigo_competicao} no football-data.org: {e}")
+        return {}
+
+def encontrar_resumo_time(tabela, nome_time):
+    if not tabela:
+        return "sem dados de tabela disponíveis"
+    nome_time_lower = nome_time.lower()
+    for nome_tabela, resumo in tabela.items():
+        if nome_time_lower in nome_tabela or nome_tabela in nome_time_lower:
+            return resumo
+    return "time não encontrado na tabela (nome pode divergir entre as fontes)"
+
+# ==========================================
+# 3. FUNÇÃO: BUSCAR JOGOS E ODDS (COM TABELA REAL INJETADA)
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
     hoje_utc = datetime.now(timezone.utc).date()
+    tabelas_cache = {}  # evita buscar a mesma tabela mais de uma vez
 
     for liga in LIGAS:
+        codigo_fd = MAPA_COMPETICOES_FOOTBALL_DATA.get(liga)
+        if codigo_fd and codigo_fd not in tabelas_cache:
+            print(f"Buscando tabela real de {liga} no football-data.org...")
+            tabelas_cache[codigo_fd] = buscar_tabela_competicao(codigo_fd)
+        tabela_liga = tabelas_cache.get(codigo_fd, {})
+
         url = f"https://api.the-odds-api.com/v4/sports/{liga}/odds/"
         params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h"}
         try:
@@ -55,7 +119,14 @@ def buscar_jogos_do_dia():
                     if bookmakers:
                         bm_betano = next((b for b in bookmakers if b['key'] == 'betano'), bookmakers[0])
                         odds = bm_betano['markets'][0]['outcomes']
-                        info_jogo = f"LIGA: {liga} | DATA: {data_jogo} | {jogo['home_team']} vs {jogo['away_team']} | ODDS (Casa: {bm_betano['title']}): {odds}"
+                        resumo_casa = encontrar_resumo_time(tabela_liga, jogo['home_team'])
+                        resumo_fora = encontrar_resumo_time(tabela_liga, jogo['away_team'])
+                        info_jogo = (
+                            f"LIGA: {liga} | DATA: {data_jogo} | "
+                            f"{jogo['home_team']} (mandante — tabela real: {resumo_casa}) vs "
+                            f"{jogo['away_team']} (visitante — tabela real: {resumo_fora}) | "
+                            f"ODDS (Casa: {bm_betano['title']}): {odds}"
+                        )
                         jogos_disponiveis.append(info_jogo)
         except requests.exceptions.RequestException as e:
             print(f"Erro ao buscar liga {liga}: {e}")
@@ -78,6 +149,11 @@ def analisar_com_ia_unificada(lista_de_jogos):
 
     SUA MISSÃO:
     Analisar os jogos disponíveis hoje/amanhã com a postura de um 'Advogado do Diabo' (estritamente cético e rigoroso). Em uma ÚNICA resposta, montar TRÊS apostas múltiplas distintas cruzando microfatores táticos (xG, cartões, desfalques, árbitros). REGRA DE OURO: NUNCA alucine ou invente estatísticas. Trabalhe apenas com dados reais pesquisados ou fornecidos. As três múltiplas devem obrigatoriamente ser formadas por jogos da MESMA DATA.
+
+    IMPORTANTE: os dados de "tabela real" (posição, pontos, forma recente V/E/D, saldo de gols) já vêm
+    verificados diretamente do football-data.org, ao lado de cada time na lista de jogos abaixo — use-os
+    como base confiável de contexto. Cartões, escanteios e xG específicos ainda precisam ser pesquisados
+    por você via busca.
 
     ESTRUTURA DAS MÚLTIPLAS EXIGIDAS:
     1. 🛡️ MÚLTIPLA CONSERVADORA: Odd total máxima de 10. Foco extremo em segurança, favoritos absolutos ou under gols em jogos travados. Stake sugerida: 0,50u.
@@ -188,7 +264,8 @@ def analisar_com_ia_unificada(lista_de_jogos):
                 model='gemini-3.6-flash',
                 contents=prompt_master,
                 config=types.GenerateContentConfig(
-                    tools=[{"google_search": {}}]
+                    tools=[{"google_search": {}}],
+                    temperature=0.2  # mais baixo = raciocínio mais conservador e consistente
                 )
             )
             print(f"Sucesso com a Chave #{i+1}.")
