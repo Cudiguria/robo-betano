@@ -19,7 +19,7 @@ GEMINI_KEYS = [
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 
 # Credenciais do Telegram (CORRIGIDO PARA TELEGRAM_TOKEN)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Ligas monitoradas
