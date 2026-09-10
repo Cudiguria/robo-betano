@@ -26,7 +26,6 @@ jobs:
 
       - name: Executar o robô
         env:
-          # Certifique-se de que os nomes batem com os Secrets criados no repositório
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
