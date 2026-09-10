@@ -167,6 +167,18 @@ def analisar_com_ia(lista_de_jogos):
     
     🔍 *ANÁLISE E FONTES:* 
     [Escreva um parágrafo completo explicando a estratégia tática do bilhete, cruzamento de métricas, as médias obtidas e citando obrigatoriamente as fontes consultadas de cada dado.]
+    ======================================================================
+    CHECKLIST DE VERIFICAÇÃO OBRIGATÓRIA (FAÇA ANTES DE ENVIAR)
+    ======================================================================
+    Antes de gerar o relatório final para o Telegram, confirme internamente se você executou todas as etapas abaixo. Inclua este checklist resumido no final da sua resposta para auditoria:
+
+    1. [ ] Analisei o xG e os splits de desempenho Casa x Fora de cada equipe?
+    2. [ ] Apliquei a trava de escanteios (proibindo cantos para favoritos que abrem o placar cedo ou contra blocos baixos)?
+    3. [ ] Validei o cruzamento duplo do árbitro (>5.5) e o clima disciplinar para os cartões?
+    4. [ ] Verifiquei fadiga, viagens ou menos de 72h de descanso (tendência a Under)?
+    5. [ ] Eliminei "trap odds" e garanto que todas as pernas pertencem estritamente à MESMA DATA?
+    6. [ ] Citei as fontes reais de dados (ex: FBref, Sofascore) para cada estatística utilizada?
+    7. [ ] O [⚠️ AVISO DE RISCO] foi incluído caso a grade estivesse fraca e as odds tenham sido forçadas?
 
     JOGOS DISPONÍVEIS:
     {lista_de_jogos}
