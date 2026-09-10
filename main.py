@@ -22,17 +22,13 @@ GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Ligas monitoradas
+# Ligas otimizadas (Foco em cobertura diária e redução de cota de pesquisa)
 LIGAS = [
-    "soccer_epl",                # Premier League
-    "soccer_uefa_champs_league", # Champions League
     "soccer_brazil_campeonato",  # Brasileirão Série A
     "soccer_spain_la_liga",      # La Liga
-    "soccer_italy_serie_a",      # Itália Serie A
-    "soccer_germany_bundesliga", # Alemanha Bundesliga
-    "soccer_france_ligue_one",   # França Ligue 1
-    "soccer_efl_champ",          # Inglaterra Championship
-    "soccer_usa_mls"             # EUA MLS
+    "soccer_italy_serie_a",      # Serie A Italiana
+    "soccer_epl",                # Premier League
+    "soccer_uefa_champs_league"  # UEFA Champions League
 ]
 
 # ==========================================
@@ -76,7 +72,7 @@ def buscar_jogos_do_dia():
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 3. FUNÇÃO: PROCESSAR TODOS OS BILHETES EM UMA CHAMADA
+# 3. FUNÇÃO: PROCESSAR TODOS OS BILHETES EM UMA CHAMADA UNIFICADA
 # ==========================================
 def analisar_com_ia_unificada(lista_de_jogos):
     if not lista_de_jogos:
@@ -118,7 +114,7 @@ def analisar_com_ia_unificada(lista_de_jogos):
        - Não force encaixes. Se a amostra de dados for insuficiente ou a estatística não estiver disponível, recuse o mercado. Só aprove seleções que resistam à ótica rigorosa de risco x retorno.
        - Amostragem Recente (Últimos 10 Jogos): Fundamente cada escolha na média e na frequência dos últimos 10 jogos oficiais de cada equipe e atleta.
     
-    7. TRANSPARÊNCIA E CITAÇÃO DE FONTES OBRIGATÓRIA (Nova Regra):
+    7. TRANSPARÊNCIA E CITAÇÃO DE FONTES OBRIGATÓRIA:
        - Forneça a fonte exata de onde extraiu cada estatística utilizada (ex: FBref, Sofascore, imagens fornecidas, painel Betano).
        - Apresente as médias reais (de escanteios, cartões, xG, etc.) diretamente ligadas ao argumento de validação da perna do bilhete.
 
@@ -193,7 +189,7 @@ def analisar_com_ia_unificada(lista_de_jogos):
             print(f"Tentando conexão com o Gemini usando a Chave #{i+1}...")
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-3.6-flash',
                 contents=prompt_master,
                 config=types.GenerateContentConfig(
                     tools=[{"google_search": {}}]
@@ -246,7 +242,7 @@ if __name__ == "__main__":
         print("Nenhum jogo encontrado. Encerrando execução.")
         exit()
 
-    print("Iniciando análise única com o Gemini 2.0 Flash...")
+    print("Iniciando análise única com o Gemini 3.6 Flash...")
     resposta_ia = analisar_com_ia_unificada(grade_hoje)
     
     if "Erro crítico" in resposta_ia or "Erro na análise" in resposta_ia:
@@ -261,7 +257,7 @@ if __name__ == "__main__":
             if bilhete_limpo:
                 print("Enviando bilhete fatiado para o Telegram...")
                 enviar_telegram(bilhete_limpo)
-                # Pausa curta para não ultrapassar limites de envio do Telegram
+                # Pausa de 3 segundos entre as mensagens para evitar travamento da API do Telegram
                 time.sleep(3)
         
     print("\nProcesso concluído com sucesso!")
