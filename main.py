@@ -9,24 +9,26 @@ from google.genai import types
 # ==========================================
 # 1. CONFIGURAÇÕES E CHAVES DE API
 # ==========================================
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
-APIFOOTBALL_KEY = os.getenv("APIFOOTBALL_KEY")
-APIOPENWEATHER_KEY = os.getenv("APIOPENWEATHER_KEY")
+# O .strip() garante que espaços ou "Tabs" invisíveis copiados no GitHub sejam apagados
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "").strip()
+FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY", "").strip()
+APIFOOTBALL_KEY = os.getenv("APIFOOTBALL_KEY", "").strip()
+APIOPENWEATHER_KEY = os.getenv("APIOPENWEATHER_KEY", "").strip()
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 # Rotação das 6 chaves do GitHub
 GEMINI_KEYS = [
-    os.getenv("GEMINI_API_KEY"),
-    os.getenv("GEMINI_API_KEY_1"),
-    os.getenv("GEMINI_API_KEY_2"),
-    os.getenv("GEMINI_API_KEY_3"),
-    os.getenv("GEMINI_API_KEY_4"),
-    os.getenv("GEMINI_API_KEY_5")
+    os.getenv("GEMINI_API_KEY", "").strip(),
+    os.getenv("GEMINI_API_KEY_1", "").strip(),
+    os.getenv("GEMINI_API_KEY_2", "").strip(),
+    os.getenv("GEMINI_API_KEY_3", "").strip(),
+    os.getenv("GEMINI_API_KEY_4", "").strip(),
+    os.getenv("GEMINI_API_KEY_5", "").strip()
 ]
+# Mantém apenas as chaves que não estão vazias
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 LIGAS = [
     "soccer_epl", "soccer_uefa_champs_league", "soccer_brazil_campeonato",
@@ -42,7 +44,6 @@ MAPA_COMPETICOES_FOOTBALL_DATA = {
 }
 
 # Mapa das ligas pro ID numérico usado pela API-Football (v3.football.api-sports.io)
-# IDs padrão e estáveis da própria documentação da API-Football.
 MAPA_LIGAS_API_FOOTBALL = {
     "soccer_epl": 39,
     "soccer_uefa_champs_league": 2,
@@ -56,8 +57,6 @@ MAPA_LIGAS_API_FOOTBALL = {
 }
 
 def temporada_atual():
-    # Convenção padrão: temporada europeia começa em julho/agosto.
-    # De jan a jun, ainda estamos na temporada que começou no ano anterior.
     hoje = datetime.now(timezone.utc)
     return hoje.year if hoje.month >= 7 else hoje.year - 1
 
@@ -104,17 +103,14 @@ def encontrar_resumo_time(tabela, nome_time):
 
 def buscar_fixtures_api_football(id_liga_api_football, data_str):
     """
-    Busca, de uma vez, TODOS os jogos de uma liga numa data específica na
-    API-Football — inclui árbitro e cidade do estádio de cada jogo.
-    1 chamada por liga por dia (cache feito em buscar_jogos_do_dia).
+    Busca árbitro e cidade oficial na api-sports.io, usando a chave correta.
     """
     if not APIFOOTBALL_KEY or not id_liga_api_football:
         return {}
 
-    url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
+    url = "https://v3.football.api-sports.io/fixtures"
     headers = {
-        "X-RapidAPI-Key": APIFOOTBALL_KEY,
-        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+        "x-apisports-key": APIFOOTBALL_KEY
     }
     params = {
         "league": id_liga_api_football,
@@ -123,6 +119,9 @@ def buscar_fixtures_api_football(id_liga_api_football, data_str):
     }
 
     try:
+        # Pausa obrigatória de 2 segundos para o plano grátis não dar erro 429
+        time.sleep(2)
+        
         resposta = requests.get(url, headers=headers, params=params, timeout=10)
         resposta.raise_for_status()
         dados = resposta.json()
@@ -146,7 +145,6 @@ def encontrar_extras_jogo(mapa_fixtures, home_team, away_team):
     chave_exata = f"{home_team.lower()}_vs_{away_team.lower()}"
     if chave_exata in mapa_fixtures:
         return mapa_fixtures[chave_exata]
-    # fallback: procura por correspondência parcial de nomes (nomes podem divergir entre APIs)
     for chave, valor in mapa_fixtures.items():
         if home_team.lower() in chave and away_team.lower() in chave:
             return valor
@@ -154,7 +152,7 @@ def encontrar_extras_jogo(mapa_fixtures, home_team, away_team):
 
 def buscar_clima(cidade, cache_clima):
     if not APIOPENWEATHER_KEY or not cidade:
-        return "Clima: não disponível"
+        return "Clima: não disponível (Verifique API Key ou cidade)"
     if cidade in cache_clima:
         return cache_clima[cidade]
 
@@ -169,20 +167,20 @@ def buscar_clima(cidade, cache_clima):
         vento = dados["wind"]["speed"]
         resultado = f"{cidade}: {temp}°C, {descricao}, vento {vento}m/s"
     except Exception as e:
-        resultado = f"Clima de {cidade}: não disponível ({e})"
+        resultado = f"Clima de {cidade}: não disponível"
 
     cache_clima[cidade] = resultado
     return resultado
 
 # ==========================================
-# 3. FUNÇÃO: BUSCAR JOGOS E ODDS (Janela de 3 Dias)
+# 3. FUNÇÃO: BUSCAR JOGOS E ODDS (Janela de 1 Dia)
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
     hoje_utc = datetime.now(timezone.utc).date()
     tabelas_cache = {}
-    fixtures_cache = {}  # chave: (id_liga_api_football, data_str)
-    clima_cache = {}     # chave: nome da cidade
+    fixtures_cache = {}  
+    clima_cache = {}     
 
     for liga in LIGAS:
         codigo_fd = MAPA_COMPETICOES_FOOTBALL_DATA.get(liga)
@@ -204,12 +202,11 @@ def buscar_jogos_do_dia():
                 data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
                 diferenca_dias = (data_jogo - hoje_utc).days
 
-                if 0 <= diferenca_dias <= 1:  # reduzido de 3 pra 1 dia — 3 dias estourava a cota de tokens/minuto
+                if 0 <= diferenca_dias <= 1:  
                     bookmakers = jogo.get('bookmakers', [])
                     if bookmakers:
                         bm = next((b for b in bookmakers if b['key'] == 'betano'), bookmakers[0])
                         outcomes = bm['markets'][0]['outcomes']
-                        # Formato compacto em vez do dict bruto — economiza tokens sem perder informação
                         odds = " / ".join(f"{o['name']}: {o['price']}" for o in outcomes)
                         resumo_casa = encontrar_resumo_time(tabela_liga, jogo['home_team'])
                         resumo_fora = encontrar_resumo_time(tabela_liga, jogo['away_team'])
@@ -239,17 +236,15 @@ def buscar_jogos_do_dia():
 
     print(f"Total de jogos encontrados: {len(jogos_disponiveis)}")
 
-    # Trava de segurança: nunca manda mais que 60 jogos no prompt, não importa
-    # quantos existam — evita estourar a cota de tokens/minuto mesmo em dias cheios.
     LIMITE_MAXIMO_JOGOS = 60
     if len(jogos_disponiveis) > LIMITE_MAXIMO_JOGOS:
-        print(f"Aviso: {len(jogos_disponiveis)} jogos encontrados, cortando para os primeiros {LIMITE_MAXIMO_JOGOS} (limite de tokens).")
+        print(f"Aviso: {len(jogos_disponiveis)} jogos encontrados, cortando para os primeiros {LIMITE_MAXIMO_JOGOS}.")
         jogos_disponiveis = jogos_disponiveis[:LIMITE_MAXIMO_JOGOS]
 
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 4. FUNÇÃO: ANALISAR COM IA (DIRETRIZES COMPLETAS RESTAURADAS)
+# 4. FUNÇÃO: ANALISAR COM IA (PROMPT MASTER)
 # ==========================================
 def analisar_com_ia_unificada(lista_de_jogos):
     if not lista_de_jogos: return "Nenhum jogo encontrado."
