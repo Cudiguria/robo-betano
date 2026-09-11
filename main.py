@@ -2,6 +2,7 @@ import os
 import re
 import time
 import requests
+import pandas as pd
 from datetime import datetime, timezone
 from google import genai
 from google.genai import types
@@ -17,7 +18,6 @@ APIOPENWEATHER_KEY = os.getenv("APIOPENWEATHER_KEY", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-# Rotação das 6 chaves do GitHub
 GEMINI_KEYS = [
     os.getenv("GEMINI_API_KEY", "").strip(),
     os.getenv("GEMINI_API_KEY_1", "").strip(),
@@ -47,6 +47,15 @@ MAPA_LIGAS_API_FOOTBALL = {
     "soccer_france_ligue_one": 61, "soccer_efl_champ": 40, "soccer_usa_mls": 253,
 }
 
+# Novos Links do FBref para Scraping de Dados Avançados
+MAPA_LIGAS_FBREF = {
+    "soccer_epl": "https://fbref.com/en/comps/9/Premier-League-Stats",
+    "soccer_brazil_campeonato": "https://fbref.com/en/comps/24/Serie-A-Stats",
+    "soccer_spain_la_liga": "https://fbref.com/en/comps/12/La-Liga-Stats",
+    "soccer_italy_serie_a": "https://fbref.com/en/comps/11/Serie-A-Stats",
+    "soccer_germany_bundesliga": "https://fbref.com/en/comps/20/Bundesliga-Stats"
+}
+
 def temporada_atual():
     hoje = datetime.now(timezone.utc)
     return hoje.year if hoje.month >= 7 else hoje.year - 1
@@ -61,7 +70,51 @@ def limpar_nome_time(nome):
     return nome
 
 # ==========================================
-# 2. FUNÇÕES DE DADOS EXTERNOS (APIs)
+# 2. FBREF WEB SCRAPING (O MOTOR NOVO)
+# ==========================================
+def raspar_dados_fbref(liga):
+    link = MAPA_LIGAS_FBREF.get(liga)
+    if not link: return {}
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    try:
+        time.sleep(3) # Pausa obrigatória para o FBref não bloquear
+        resposta = requests.get(link, headers=headers, timeout=15)
+        # O pandas varre o HTML e acha todas as tabelas
+        tabelas = pd.read_html(resposta.text)
+        
+        # A tabela 0 do FBref costuma ser a Standard Stats (xG, Cartões, etc)
+        df = tabelas[0]
+        # Limpando o cabeçalho duplo que o FBref usa
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(0)
+            
+        dados_avancados = {}
+        for _, linha in df.iterrows():
+            if 'Squad' not in linha: continue
+            nome_time = limpar_nome_time(str(linha['Squad']))
+            xg = linha.get('xG', 'N/A')
+            xg_contra = linha.get('xGA', 'N/A')
+            amarelos = linha.get('CrdY', 'N/A')
+            vermelhos = linha.get('CrdR', 'N/A')
+            
+            dados_avancados[nome_time] = f"xG Pró: {xg} | xG Contra: {xg_contra} | Cartões(Amarelos/Vermelhos): {amarelos}/{vermelhos}"
+            
+        return dados_avancados
+    except Exception as e:
+        print(f"Erro ao raspar FBref para {liga}: {e}")
+        return {}
+
+def encontrar_fbref_time(dados_fbref, nome_time):
+    if not dados_fbref: return "Sem dados táticos avançados"
+    nome_limpo = limpar_nome_time(nome_time)
+    for nome_tabela, resumo in dados_fbref.items():
+        if nome_limpo in nome_tabela or nome_tabela in nome_limpo:
+            return resumo
+    return "Dados avançados não localizados"
+
+# ==========================================
+# 3. FUNÇÕES DE DADOS EXTERNOS (APIs CLÁSSICAS)
 # ==========================================
 def buscar_tabela_competicao(codigo_competicao):
     if not FOOTBALL_DATA_API_KEY or not codigo_competicao: return {}
@@ -87,18 +140,16 @@ def buscar_tabela_competicao(codigo_competicao):
                     f"Saldo: {time_dados['goalDifference']} | Média Gols Pró: {media_pro} | "
                     f"Média Gols Contra: {media_contra} | Forma Recente: {forma}"
                 )
-                tabela[nome.lower()] = resumo
+                tabela[limpar_nome_time(nome)] = resumo
         return tabela
     except Exception as e:
-        print(f"Aviso: falha ao buscar tabela football-data ({codigo_competicao}): {e}")
         return {}
 
 def encontrar_resumo_time(tabela, nome_time):
     if not tabela: return "Sem dados de tabela"
     nome_limpo = limpar_nome_time(nome_time)
     for nome_tabela, resumo in tabela.items():
-        if nome_limpo in nome_tabela or nome_tabela in nome_limpo:
-            return resumo
+        if nome_limpo in nome_tabela or nome_tabela in nome_limpo: return resumo
     return "Time não localizado na tabela"
 
 def buscar_fixtures_api_football(id_liga_api_football, data_str):
@@ -122,7 +173,6 @@ def buscar_fixtures_api_football(id_liga_api_football, data_str):
             mapa_jogos[chave] = {"arbitro": arbitro, "cidade": cidade}
         return mapa_jogos
     except Exception as e:
-        print(f"Aviso: falha ao buscar fixtures API-Football (liga {id_liga_api_football}, {data_str}): {e}")
         return {}
 
 def encontrar_extras_jogo(mapa_fixtures, home_team, away_team):
@@ -158,24 +208,29 @@ def buscar_clima(cidade, cache_clima):
     return resultado
 
 # ==========================================
-# 3. FUNÇÃO: BUSCAR JOGOS E ODDS (COM MERCADOS AVANÇADOS)
+# 4. FUNÇÃO: BUSCAR JOGOS E ODDS
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
     hoje_utc = datetime.now(timezone.utc).date()
-    tabelas_cache, fixtures_cache, clima_cache = {}, {}, {}
+    tabelas_cache, fixtures_cache, clima_cache, fbref_cache = {}, {}, {}, {}
 
     for liga in LIGAS:
+        # Cache Football Data
         codigo_fd = MAPA_COMPETICOES_FOOTBALL_DATA.get(liga)
         if codigo_fd and codigo_fd not in tabelas_cache:
             tabelas_cache[codigo_fd] = buscar_tabela_competicao(codigo_fd)
         tabela_liga = tabelas_cache.get(codigo_fd, {})
+        
+        # Cache FBref
+        if liga not in fbref_cache:
+            fbref_cache[liga] = raspar_dados_fbref(liga)
+        fbref_liga = fbref_cache.get(liga, {})
 
         id_liga_af = MAPA_LIGAS_API_FOOTBALL.get(liga)
 
-        # AGORA BUSCA RESULTADO FINAL (h2h) e OVER/UNDER (totals)
         url = f"https://api.the-odds-api.com/v4/sports/{liga}/odds/"
-        params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h,totals"}
+        params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h,totals,spreads"}
 
         try:
             resposta = requests.get(url, params=params)
@@ -191,7 +246,6 @@ def buscar_jogos_do_dia():
                     if bookmakers:
                         bm = next((b for b in bookmakers if b['key'] == 'betano'), bookmakers[0])
                         
-                        # Formatando os múltiplos mercados para a IA
                         odds_str_list = []
                         for market in bm['markets']:
                             m_key = market['key'].upper()
@@ -202,11 +256,13 @@ def buscar_jogos_do_dia():
                                 price = o.get('price', '')
                                 outcomes_list.append(f"{name}{point}: {price}")
                             odds_str_list.append(f"[{m_key}] {' / '.join(outcomes_list)}")
-                        
                         odds_finais = " | ".join(odds_str_list)
                         
                         resumo_casa = encontrar_resumo_time(tabela_liga, jogo['home_team'])
                         resumo_fora = encontrar_resumo_time(tabela_liga, jogo['away_team'])
+                        
+                        fbref_casa = encontrar_fbref_time(fbref_liga, jogo['home_team'])
+                        fbref_fora = encontrar_fbref_time(fbref_liga, jogo['away_team'])
 
                         data_str = data_jogo.isoformat()
                         chave_cache_fixture = (id_liga_af, data_str)
@@ -220,18 +276,15 @@ def buscar_jogos_do_dia():
 
                         info_jogo = (
                             f"LIGA: {liga} | DATA: {data_jogo} | \n"
-                            f"CASA: {jogo['home_team']} (Tabela: {resumo_casa}) \n"
-                            f"FORA: {jogo['away_team']} (Tabela: {resumo_fora}) \n"
+                            f"CASA: {jogo['home_team']} (Tabela: {resumo_casa} | Tático: {fbref_casa}) \n"
+                            f"FORA: {jogo['away_team']} (Tabela: {resumo_fora} | Tático: {fbref_fora}) \n"
                             f"ODDS: {odds_finais} \n"
                             f"EXTRAS: {info_arbitro} | {info_clima}\n"
                             f"-" * 40
                         )
                         jogos_disponiveis.append(info_jogo)
         except Exception as e:
-            print(f"Erro ao buscar liga {liga}: {e}")
             continue
-
-    print(f"Total de jogos encontrados: {len(jogos_disponiveis)}")
 
     LIMITE_MAXIMO_JOGOS = 60
     if len(jogos_disponiveis) > LIMITE_MAXIMO_JOGOS:
@@ -240,7 +293,7 @@ def buscar_jogos_do_dia():
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 4. FUNÇÃO: ANALISAR COM IA (PROMPT MASTER EVOLUÍDO)
+# 5. FUNÇÃO: ANALISAR COM IA 
 # ==========================================
 def analisar_com_ia_unificada(lista_de_jogos):
     if not lista_de_jogos: return "Nenhum jogo encontrado."
@@ -249,14 +302,12 @@ def analisar_com_ia_unificada(lista_de_jogos):
     Você é Analista Sênior de Sports Trading na Betano, postura de "Advogado do Diabo" (cético, rigoroso).
     MISSÃO: montar 1 múltipla (odd ~20.00), só com jogos da MESMA DATA (escolha 1 dia e monte tudo nele).
 
-    REGRAS DE OURO (aplique todas rigorosamente):
-    1. Análise de Médias: use posição, pontos, saldo, e médias exatas de Gols Pró/Contra da tabela.
-    2. Condições de Clima e Árbitro: Clima adverso (chuva/vento forte) favorece Under Gols ou Ambas Não Marcam; Árbitros rigorosos justificam mercados de cartões, se coerente com a tensão da partida (Ex: clássicos ou brigas por rebaixamento).
-    3. EXPLORAÇÃO INTELIGENTE DE MERCADOS: Você NÃO está preso ao mercado de Vencedor (1X2). Se a análise apontar alto risco de zebra ou equilíbrio excessivo, você tem TOTAL LIBERDADE para adotar mercados alternativos como Dupla Chance (1X/X2), Empate Anula Aposta (DNB), Over/Under Gols (ex: Over 1.5, Under 2.5), Ambas Marcam (BTTS), Over Gols no 1º Tempo (HT), Escanteios ou Cartões. 
-    (ATENÇÃO: Use esses mercados como "blindagem" para a aposta, NÃO os aplique como regra forçada se o Vencedor 1X2 tiver margem clara de segurança. Caso a odd exata do mercado alternativo escolhido não conste no texto, estime-a de forma justa, conservadora e baseada na probabilidade matemática do H2H fornecido).
+    REGRAS DE OURO:
+    1. Análise de Médias: use posição, pontos, e as novas métricas táticas de xG (Gols Esperados) e Cartões fornecidos no texto.
+    2. Condições de Clima e Árbitro: Clima adverso favorece Under Gols; Árbitros rigorosos somados a times com alta contagem de cartões justificam apostas disciplinares.
+    3. EXPLORAÇÃO DE MERCADOS: Você tem TOTAL LIBERDADE para adotar mercados alternativos como Dupla Chance (1X/X2), Empate Anula Aposta (DNB), Over/Under Gols, Cartões ou Handicaps. Use-os como "blindagem" se o Vencedor 1X2 for arriscado. O xG aponta a força real do ataque para inferir escanteios ou gols.
     4. Valor: Descarte trap odds (≤1.25) que não compensam o risco de variância na múltipla.
-    5. Anti-alucinação: Só cite dados (gols, pontos, clima, árbitro) que existam no texto. Dado ausente = não cite.
-    6. Grade fraca: se não houver embasamento para Odd 20 segura, abra com [⚠️ AVISO DE RISCO DESTACADO].
+    5. ANTI-ALUCINAÇÃO E LIMPEZA: Só cite dados que existam. SE a informação do árbitro, clima ou xG constar como "não disponível/não informado", NÃO MENCIONE ISSO NA RESPOSTA. Simplesmente omita.
 
     FORMATO DE SAÍDA EXIGIDO (Telegram):
     ### 🎯 BILHETE MÚLTIPLO DE VALOR | DATA: [DD/MM/AAAA]
@@ -265,16 +316,15 @@ def analisar_com_ia_unificada(lista_de_jogos):
 
     | Jogo | Liga | Mercado | Odd | Justificativa Enxuta |
     |:---|:---|:---|:---|:---|
-    | [Time A vs Time B] | [Liga] | [Mercado Escolhido (ex: Dupla Chance Casa)] | [Odd] | [resumo] |
+    | [Time A vs Time B] | [Liga] | [Mercado Escolhido] | [Odd] | [resumo] |
     (linhas suficientes até ~odd 20)
 
     ---
     ### 🔍 FUNDAMENTAÇÃO TÁTICA E PROTEÇÃO DE MERCADO
-    Pra cada jogo do bilhete, detalhe o rigor aplicado:
     ⚽ **[Time A] vs [Time B]**
-    - **Tabela e Médias:** [pontos, posição, médias Pró/Contra reais]
-    - **Contexto Extra:** [Impacto do clima/árbitro, se disponíveis e relevantes]
-    - **Leitura do Mercado:** [Justifique por que você escolheu ESTE mercado específico em vez de outro. Ex: "Fugi do Vencedor 1X2 devido à inconsistência do visitante, preferindo Dupla Chance 1X para blindar o risco" ou "Médias altas de Gols Pró justificam o Over 2.5"]
+    - **Tabela e xG:** [pontos, saldo e leitura dos gols esperados e cartões]
+    - **Contexto Extra:** [Impacto do clima/árbitro, apenas se relevantes]
+    - **Leitura do Mercado:** [Justifique a escolha técnica da proteção escolhida]
 
     JOGOS E DADOS REAIS:
     {lista_de_jogos}
@@ -283,52 +333,52 @@ def analisar_com_ia_unificada(lista_de_jogos):
     ultimo_erro = None
     for i, key in enumerate(GEMINI_KEYS):
         try:
-            print(f"Tentando conexão com Gemini na Chave #{i+1}...")
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
                 model='gemini-3.6-flash',
                 contents=prompt_master,
                 config=types.GenerateContentConfig(temperature=0.2)
             )
-            print(f"Sucesso com a Chave #{i+1}.")
             return response.text
         except Exception as e:
-            print(f"Erro com a Chave #{i+1}: {e}")
             ultimo_erro = e
             continue
 
     return f"Erro crítico: Todas as chaves falharam. Último erro: {ultimo_erro}"
 
 # ==========================================
-# 5. FUNÇÃO: ENVIAR PARA O TELEGRAM
+# 6. FUNÇÃO: ENVIAR PARA O TELEGRAM (ANTI-CORTE)
 # ==========================================
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    mensagem_formatada = mensagem[:4090]
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mensagem_formatada, "parse_mode": "Markdown"}
-    try:
-        requests.post(url, json=payload).raise_for_status()
-        print("Mensagem enviada com sucesso (Markdown).")
-    except requests.exceptions.RequestException:
-        payload_sem_formato = {"chat_id": TELEGRAM_CHAT_ID, "text": mensagem_formatada}
+    
+    pedacos = [mensagem[i:i+4000] for i in range(0, len(mensagem), 4000)]
+    
+    for pedaco in pedacos:
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": pedaco, "parse_mode": "Markdown"}
         try:
-            requests.post(url, json=payload_sem_formato).raise_for_status()
-            print("Mensagem enviada com sucesso (texto puro).")
-        except Exception as e:
-            print(f"Erro ao enviar para o Telegram: {e}")
+            requests.post(url, json=payload).raise_for_status()
+            time.sleep(1) 
+        except requests.exceptions.RequestException:
+            payload_sem_formato = {"chat_id": TELEGRAM_CHAT_ID, "text": pedaco}
+            try:
+                requests.post(url, json=payload_sem_formato).raise_for_status()
+                time.sleep(1)
+            except Exception as e:
+                print(f"Erro ao enviar pedaço para o Telegram: {e}")
 
 # ==========================================
-# 6. EXECUÇÃO PRINCIPAL
+# 7. EXECUÇÃO PRINCIPAL
 # ==========================================
 if __name__ == "__main__":
-    print("Buscando jogos e processando tabelas e odds (H2H e Totais)...")
+    print("Iniciando varredura tática...")
     grade = buscar_jogos_do_dia()
 
     if not grade:
         print("Nenhum jogo encontrado.")
         exit()
 
-    print("Iniciando análise com Gemini... Orientando para exploração inteligente de mercados.")
+    print("Enviando matriz para a IA...")
     resposta_ia = analisar_com_ia_unificada(grade)
 
     if "Erro crítico" in resposta_ia:
