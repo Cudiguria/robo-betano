@@ -47,7 +47,6 @@ MAPA_LIGAS_API_FOOTBALL = {
     "soccer_france_ligue_one": 61, "soccer_efl_champ": 40, "soccer_usa_mls": 253,
 }
 
-# Novos Links do FBref para Scraping de Dados Avançados
 MAPA_LIGAS_FBREF = {
     "soccer_epl": "https://fbref.com/en/comps/9/Premier-League-Stats",
     "soccer_brazil_campeonato": "https://fbref.com/en/comps/24/Serie-A-Stats",
@@ -70,7 +69,7 @@ def limpar_nome_time(nome):
     return nome
 
 # ==========================================
-# 2. FBREF WEB SCRAPING (O MOTOR NOVO)
+# 2. FBREF WEB SCRAPING
 # ==========================================
 def raspar_dados_fbref(liga):
     link = MAPA_LIGAS_FBREF.get(liga)
@@ -78,14 +77,10 @@ def raspar_dados_fbref(liga):
     
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
-        time.sleep(3) # Pausa obrigatória para o FBref não bloquear
+        time.sleep(3)
         resposta = requests.get(link, headers=headers, timeout=15)
-        # O pandas varre o HTML e acha todas as tabelas
         tabelas = pd.read_html(resposta.text)
-        
-        # A tabela 0 do FBref costuma ser a Standard Stats (xG, Cartões, etc)
         df = tabelas[0]
-        # Limpando o cabeçalho duplo que o FBref usa
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(0)
             
@@ -102,7 +97,7 @@ def raspar_dados_fbref(liga):
             
         return dados_avancados
     except Exception as e:
-        print(f"Erro ao raspar FBref para {liga}: {e}")
+        print(f"Aviso: falha ao raspar FBref para {liga}: {e}")
         return {}
 
 def encontrar_fbref_time(dados_fbref, nome_time):
@@ -114,7 +109,7 @@ def encontrar_fbref_time(dados_fbref, nome_time):
     return "Dados avançados não localizados"
 
 # ==========================================
-# 3. FUNÇÕES DE DADOS EXTERNOS (APIs CLÁSSICAS)
+# 3. FUNÇÕES DE DADOS EXTERNOS (APIs)
 # ==========================================
 def buscar_tabela_competicao(codigo_competicao):
     if not FOOTBALL_DATA_API_KEY or not codigo_competicao: return {}
@@ -208,7 +203,7 @@ def buscar_clima(cidade, cache_clima):
     return resultado
 
 # ==========================================
-# 4. FUNÇÃO: BUSCAR JOGOS E ODDS
+# 4. FUNÇÃO: BUSCAR JOGOS E ODDS (OTIMIZADA)
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
@@ -216,13 +211,11 @@ def buscar_jogos_do_dia():
     tabelas_cache, fixtures_cache, clima_cache, fbref_cache = {}, {}, {}, {}
 
     for liga in LIGAS:
-        # Cache Football Data
         codigo_fd = MAPA_COMPETICOES_FOOTBALL_DATA.get(liga)
         if codigo_fd and codigo_fd not in tabelas_cache:
             tabelas_cache[codigo_fd] = buscar_tabela_competicao(codigo_fd)
         tabela_liga = tabelas_cache.get(codigo_fd, {})
         
-        # Cache FBref
         if liga not in fbref_cache:
             fbref_cache[liga] = raspar_dados_fbref(liga)
         fbref_liga = fbref_cache.get(liga, {})
@@ -250,7 +243,8 @@ def buscar_jogos_do_dia():
                         for market in bm['markets']:
                             m_key = market['key'].upper()
                             outcomes_list = []
-                            for o in market['outcomes']:
+                            # Otimização: Restringe às 6 primeiras linhas para proteger a cota de tokens da IA
+                            for o in market['outcomes'][:6]:
                                 name = o.get('name', '')
                                 point = f" {o.get('point')}" if o.get('point') is not None else ""
                                 price = o.get('price', '')
@@ -286,7 +280,7 @@ def buscar_jogos_do_dia():
         except Exception as e:
             continue
 
-    LIMITE_MAXIMO_JOGOS = 60
+    LIMITE_MAXIMO_JOGOS = 30
     if len(jogos_disponiveis) > LIMITE_MAXIMO_JOGOS:
         jogos_disponiveis = jogos_disponiveis[:LIMITE_MAXIMO_JOGOS]
 
@@ -303,7 +297,7 @@ def analisar_com_ia_unificada(lista_de_jogos):
     MISSÃO: montar 1 múltipla (odd ~20.00), só com jogos da MESMA DATA (escolha 1 dia e monte tudo nele).
 
     REGRAS DE OURO:
-    1. Análise de Médias: use posição, pontos, e as novas métricas táticas de xG (Gols Esperados) e Cartões fornecidos no texto.
+    1. Análise de Médias: use posição, pontos, e as métricas táticas de xG (Gols Esperados) e Cartões fornecidas no texto.
     2. Condições de Clima e Árbitro: Clima adverso favorece Under Gols; Árbitros rigorosos somados a times com alta contagem de cartões justificam apostas disciplinares.
     3. EXPLORAÇÃO DE MERCADOS: Você tem TOTAL LIBERDADE para adotar mercados alternativos como Dupla Chance (1X/X2), Empate Anula Aposta (DNB), Over/Under Gols, Cartões ou Handicaps. Use-os como "blindagem" se o Vencedor 1X2 for arriscado. O xG aponta a força real do ataque para inferir escanteios ou gols.
     4. Valor: Descarte trap odds (≤1.25) que não compensam o risco de variância na múltipla.
