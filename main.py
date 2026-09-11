@@ -204,11 +204,13 @@ def buscar_jogos_do_dia():
                 data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
                 diferenca_dias = (data_jogo - hoje_utc).days
 
-                if 0 <= diferenca_dias <= 3:
+                if 0 <= diferenca_dias <= 1:  # reduzido de 3 pra 1 dia — 3 dias estourava a cota de tokens/minuto
                     bookmakers = jogo.get('bookmakers', [])
                     if bookmakers:
                         bm = next((b for b in bookmakers if b['key'] == 'betano'), bookmakers[0])
-                        odds = bm['markets'][0]['outcomes']
+                        outcomes = bm['markets'][0]['outcomes']
+                        # Formato compacto em vez do dict bruto — economiza tokens sem perder informação
+                        odds = " / ".join(f"{o['name']}: {o['price']}" for o in outcomes)
                         resumo_casa = encontrar_resumo_time(tabela_liga, jogo['home_team'])
                         resumo_fora = encontrar_resumo_time(tabela_liga, jogo['away_team'])
 
@@ -236,6 +238,14 @@ def buscar_jogos_do_dia():
             continue
 
     print(f"Total de jogos encontrados: {len(jogos_disponiveis)}")
+
+    # Trava de segurança: nunca manda mais que 60 jogos no prompt, não importa
+    # quantos existam — evita estourar a cota de tokens/minuto mesmo em dias cheios.
+    LIMITE_MAXIMO_JOGOS = 60
+    if len(jogos_disponiveis) > LIMITE_MAXIMO_JOGOS:
+        print(f"Aviso: {len(jogos_disponiveis)} jogos encontrados, cortando para os primeiros {LIMITE_MAXIMO_JOGOS} (limite de tokens).")
+        jogos_disponiveis = jogos_disponiveis[:LIMITE_MAXIMO_JOGOS]
+
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
@@ -245,64 +255,36 @@ def analisar_com_ia_unificada(lista_de_jogos):
     if not lista_de_jogos: return "Nenhum jogo encontrado."
 
     prompt_master = f"""
-    Atue como um Analista Estatístico Sênior e Especialista em Quantitative Sports Trading na Betano, com a postura de um 'Advogado do Diabo' (estritamente cético e rigoroso).
+    Você é Analista Sênior de Sports Trading na Betano, postura de "Advogado do Diabo" (cético, rigoroso).
+    MISSÃO: montar 1 múltipla (odd ~20.00), só com jogos da MESMA DATA (escolha 1 dia e monte tudo nele).
 
-    SUA MISSÃO:
-    Analisar os jogos fornecidos abaixo com base nas estatísticas matemáticas reais de tabela, médias de gols e cotações. Monte APENAS UMA aposta múltipla (Bilhete de Valor) com odd combinada em torno de 20.00.
+    REGRAS (aplique todas):
+    1. Médias: use posição, pontos, saldo, médias Gols Pró/Contra de cada time. Prefira confrontos com defesa sólida x ataque ineficiente.
+    2. Escanteios: se favorito tende a abrir placar cedo, evite cantos a favor dele; evite cantos contra bloco baixo.
+    3. Contexto: cruze necessidade de pontos na tabela (título/G4/rebaixamento/sem ambição); clima adverso (chuva/vento forte) pesa p/ Under Gols ou jogo mais físico; árbitro identificado só embasa cartões com dado real, nunca suposição.
+    4. Valor: descarte odds ≤1.25 (trap odds); você pode colocar mais de um mercado por partida se for pertinente.
+    5. Anti-alucinação: use só os números fornecidos (gols, pontos, saldo, forma, árbitro, clima). Dado "não disponível/não localizado" = não cite, não invente.
+    6. Grade fraca: se não sustentar Odd 20 com segurança, monte assim mesmo, mas abra com [⚠️ AVISO DE RISCO DESTACADO].
 
-    REGRA DE DATA (OBRIGATÓRIO): A aposta múltipla DEVE conter APENAS jogos que acontecem EXATAMENTE na MESMA DATA. Escolha um dia específico e monte o bilhete inteiro nele.
-
-    DIRETRIZES TÉCNICAS E FILTROS RIGOROSOS (Aplique rigorosamente):
-    1. ANÁLISE DE MÉDIAS E DESEMPENHO:
-       - Avalie a posição, pontos, saldo e as médias de gols Pró e Contra fornecidas no texto de cada equipe.
-       - Defesa Sólida vs Ataque Ineficiente: Identifique confrontos onde o mandante ou visitante possui alta taxa de solidez com base nos gols sofridos.
-
-    2. TRAVA DE ESCANTEIOS E "GAME SCRIPT":
-       - Se o favorito tem alta probabilidade estatística de abrir o placar cedo (visto pela tabela e odds baixas), evite recomendar mercados excessivos de cantos a favor dele (o mercado costuma morrer). Evite cantos contra defesas em blocos baixos.
-
-    3. MOTIVAÇÃO E FATORES EXTERNOS (Game State):
-       - Analise a necessidade real de pontos de cada time com base na tabela (brigando pelo título, G4, rebaixamento ou meio de tabela sem ambições).
-       - Se houver clima adverso informado (chuva forte, vento intenso), considere impacto em jogos de posse/técnica — favorecendo Under Gols ou jogo mais físico.
-       - Se o árbitro estiver identificado, use isso como contexto adicional pra mercados de cartões (árbitros mais rigorosos historicamente tendem a linhas mais altas — mas só entre nesse mercado com embasamento real, não suposição).
-
-    4. VALOR REAL E FUGA DE "TRAP ODDS":
-       - Odds baixas só são válidas quando refletem um abismo técnico nítido na tabela. Descarte sumariamente odds esmagadas (como 1.05 a 1.25) que não compensam o risco de variância em múltiplas. Odd mínima recomendada por perna: 1.45.
-
-    5. POSTURA ANTI-ALUCINAÇÃO E RIGOR MATEMÁTICO:
-       - PROIBIDO INVENTAR DADOS: Trabalhe estritamente com os números (gols, pontos, saldo, forma V/E/D, árbitro, clima) passados na lista abaixo. Se um dado não estiver disponível (ex: "não disponível" ou "não localizado"), NÃO invente um substituto — apenas não use aquele fator específico na justificativa.
-
-    6. VÁLVULA DE ESCAPE (GRADE RUIM):
-       - Se a grade do dia for fraca ou os dados não sustentarem com segurança matemática a meta de Odd 20, inclua obrigatoriamente um [⚠️ AVISO DE RISCO DESTACADO] no início da análise, alertando que a múltipla foi forçada pela ausência de opções melhores.
-
-    ======================================================================
-    FORMATO DA RESPOSTA FINAL (PARA O TELEGRAM):
-    ======================================================================
-    Siga estritamente este formato com a tabela e a fundamentação detalhada logo abaixo:
-
+    FORMATO DE SAÍDA (Telegram, seguir exatamente):
     ### 🎯 BILHETE MÚLTIPLO DE VALOR | DATA: [DD/MM/AAAA]
-    [⚠️ AVISO DE RISCO: Insira aqui apenas se a grade estiver fraca, ou omita esta linha se o dia for tecnicamente seguro]
-    Odd Combinada Total: [ODD TOTAL] | Gestão de Banca: 0.20u (Stake Padrão)
+    [⚠️ AVISO DE RISCO: só se grade fraca]
+    Odd Combinada Total: [XX.XX] | Gestão de Banca: 0.20u
 
-    | Jogo | Liga | Mercado Escolhido | Odd | Justificativa Enxuta |
+    | Jogo | Liga | Mercado | Odd | Justificativa Enxuta |
     |:---|:---|:---|:---|:---|
-    | [Time A vs Time B] | [Liga] | [Mercado] | [Odd] | [Resumo direto] |
-    *(Adicione as linhas necessárias até bater a Odd ~20.00)*
+    | [Time A vs Time B] | [Liga] | [Mercado] | [Odd] | [resumo] |
+    (linhas suficientes até ~odd 20)
 
     ---
-    ### 🔍 FUNDAMENTAÇÃO TÁTICA E MÉDIAS APLICADAS
-    (Para cada jogo da tabela acima, apresente a leitura estatística detalhada):
-
+    ### 🔍 FUNDAMENTAÇÃO TÁTICA
+    Pra cada jogo do bilhete:
     ⚽ **[Time A] vs [Time B]**
-    - **Leitura de Tabela e Médias:** [Cite os pontos, posição, saldo e as médias de gols Pró/Contra exatas extraídas dos dados]
-    - **Contexto Extra:** [Cite árbitro e/ou clima se estiverem disponíveis e forem relevantes pra escolha do mercado]
-    - **Análise de Risco / Game Script:** [Explique o cenário tático esperado, a necessidade de vitória e o porquê de o mercado escolhido resistir ao rigor analítico]
+    - **Tabela e Médias:** [pontos, posição, saldo, médias Pró/Contra reais]
+    - **Contexto Extra:** [árbitro/clima, só se relevantes e disponíveis]
+    - **Risco / Game Script:** [cenário tático, necessidade de vitória, por que o mercado resiste ao rigor analítico]
 
-    ⚽ **[Time C] vs [Time D]**
-    - **Leitura de Tabela e Médias:** [Estatísticas...]
-    - **Contexto Extra:** [árbitro/clima...]
-    - **Análise de Risco / Game Script:** [Racional...]
-
-    JOGOS DISPONÍVEIS E DADOS REAIS (Tabela, Árbitro, Clima):
+    JOGOS E DADOS REAIS (Tabela, Árbitro, Clima):
     {lista_de_jogos}
     """
 
