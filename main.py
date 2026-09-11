@@ -9,7 +9,6 @@ from google.genai import types
 # ==========================================
 # 1. CONFIGURAÇÕES E CHAVES DE API
 # ==========================================
-# O .strip() garante que espaços ou "Tabs" invisíveis copiados no GitHub sejam apagados
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "").strip()
 FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY", "").strip()
 APIFOOTBALL_KEY = os.getenv("APIFOOTBALL_KEY", "").strip()
@@ -27,7 +26,6 @@ GEMINI_KEYS = [
     os.getenv("GEMINI_API_KEY_4", "").strip(),
     os.getenv("GEMINI_API_KEY_5", "").strip()
 ]
-# Mantém apenas as chaves que não estão vazias
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 
 LIGAS = [
@@ -43,22 +41,24 @@ MAPA_COMPETICOES_FOOTBALL_DATA = {
     "soccer_france_ligue_one": "FL1", "soccer_efl_champ": "ELC"
 }
 
-# Mapa das ligas pro ID numérico usado pela API-Football (v3.football.api-sports.io)
 MAPA_LIGAS_API_FOOTBALL = {
-    "soccer_epl": 39,
-    "soccer_uefa_champs_league": 2,
-    "soccer_brazil_campeonato": 71,
-    "soccer_spain_la_liga": 140,
-    "soccer_italy_serie_a": 135,
-    "soccer_germany_bundesliga": 78,
-    "soccer_france_ligue_one": 61,
-    "soccer_efl_champ": 40,
-    "soccer_usa_mls": 253,
+    "soccer_epl": 39, "soccer_uefa_champs_league": 2, "soccer_brazil_campeonato": 71,
+    "soccer_spain_la_liga": 140, "soccer_italy_serie_a": 135, "soccer_germany_bundesliga": 78,
+    "soccer_france_ligue_one": 61, "soccer_efl_champ": 40, "soccer_usa_mls": 253,
 }
 
 def temporada_atual():
     hoje = datetime.now(timezone.utc)
     return hoje.year if hoje.month >= 7 else hoje.year - 1
+
+def limpar_nome_time(nome):
+    if not nome: return ""
+    nome = nome.lower()
+    sufixos = [" fc", " cfb", " cf", " ca", " cd", " afc", " 04", " sv", " bvb", " sc"]
+    for sufixo in sufixos:
+        nome = nome.replace(sufixo, "")
+    nome = re.sub(r'[^\w\s]', '', nome).strip()
+    return nome
 
 # ==========================================
 # 2. FUNÇÕES DE DADOS EXTERNOS (APIs)
@@ -95,44 +95,30 @@ def buscar_tabela_competicao(codigo_competicao):
 
 def encontrar_resumo_time(tabela, nome_time):
     if not tabela: return "Sem dados de tabela"
-    nome_time_lower = nome_time.lower()
+    nome_limpo = limpar_nome_time(nome_time)
     for nome_tabela, resumo in tabela.items():
-        if nome_time_lower in nome_tabela or nome_tabela in nome_time_lower:
+        if nome_limpo in nome_tabela or nome_tabela in nome_limpo:
             return resumo
     return "Time não localizado na tabela"
 
 def buscar_fixtures_api_football(id_liga_api_football, data_str):
-    """
-    Busca árbitro e cidade oficial na api-sports.io, usando a chave correta.
-    """
-    if not APIFOOTBALL_KEY or not id_liga_api_football:
-        return {}
-
+    if not APIFOOTBALL_KEY or not id_liga_api_football: return {}
     url = "https://v3.football.api-sports.io/fixtures"
-    headers = {
-        "x-apisports-key": APIFOOTBALL_KEY
-    }
-    params = {
-        "league": id_liga_api_football,
-        "season": temporada_atual(),
-        "date": data_str
-    }
+    headers = {"x-apisports-key": APIFOOTBALL_KEY}
+    params = {"league": id_liga_api_football, "season": temporada_atual(), "date": data_str}
 
     try:
-        # Pausa obrigatória de 2 segundos para o plano grátis não dar erro 429
-        time.sleep(2)
-        
+        time.sleep(2) 
         resposta = requests.get(url, headers=headers, params=params, timeout=10)
         resposta.raise_for_status()
         dados = resposta.json()
-
         mapa_jogos = {}
         for item in dados.get("response", []):
-            time_casa = item["teams"]["home"]["name"]
-            time_fora = item["teams"]["away"]["name"]
+            time_casa = limpar_nome_time(item["teams"]["home"]["name"])
+            time_fora = limpar_nome_time(item["teams"]["away"]["name"])
             arbitro = item["fixture"].get("referee") or "não informado"
             cidade = item["fixture"]["venue"].get("city") or None
-            chave = f"{time_casa.lower()}_vs_{time_fora.lower()}"
+            chave = f"{time_casa}_vs_{time_fora}"
             mapa_jogos[chave] = {"arbitro": arbitro, "cidade": cidade}
         return mapa_jogos
     except Exception as e:
@@ -140,22 +126,21 @@ def buscar_fixtures_api_football(id_liga_api_football, data_str):
         return {}
 
 def encontrar_extras_jogo(mapa_fixtures, home_team, away_team):
-    if not mapa_fixtures:
-        return {"arbitro": "não disponível", "cidade": None}
-    chave_exata = f"{home_team.lower()}_vs_{away_team.lower()}"
-    if chave_exata in mapa_fixtures:
-        return mapa_fixtures[chave_exata]
+    if not mapa_fixtures: return {"arbitro": "não disponível", "cidade": None}
+    home_clean = limpar_nome_time(home_team)
+    away_clean = limpar_nome_time(away_team)
+    
+    chave_limpa = f"{home_clean}_vs_{away_clean}"
+    if chave_limpa in mapa_fixtures: return mapa_fixtures[chave_limpa]
+        
     for chave, valor in mapa_fixtures.items():
-        if home_team.lower() in chave and away_team.lower() in chave:
-            return valor
+        if home_clean in chave and away_clean in chave: return valor
     return {"arbitro": "não localizado", "cidade": None}
 
 def buscar_clima(cidade, cache_clima):
-    if not APIOPENWEATHER_KEY or not cidade:
-        return "Clima: não disponível (Verifique API Key ou cidade)"
-    if cidade in cache_clima:
-        return cache_clima[cidade]
-
+    if not APIOPENWEATHER_KEY or not cidade: return "Clima: não disponível"
+    if cidade in cache_clima: return cache_clima[cidade]
+    
     url = "https://api.openweathermap.org/data/2.5/weather"
     params = {"q": cidade, "appid": APIOPENWEATHER_KEY, "units": "metric", "lang": "pt_br"}
     try:
@@ -173,14 +158,12 @@ def buscar_clima(cidade, cache_clima):
     return resultado
 
 # ==========================================
-# 3. FUNÇÃO: BUSCAR JOGOS E ODDS (Janela de 1 Dia)
+# 3. FUNÇÃO: BUSCAR JOGOS E ODDS (COM MERCADOS AVANÇADOS)
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
     hoje_utc = datetime.now(timezone.utc).date()
-    tabelas_cache = {}
-    fixtures_cache = {}  
-    clima_cache = {}     
+    tabelas_cache, fixtures_cache, clima_cache = {}, {}, {}
 
     for liga in LIGAS:
         codigo_fd = MAPA_COMPETICOES_FOOTBALL_DATA.get(liga)
@@ -190,8 +173,9 @@ def buscar_jogos_do_dia():
 
         id_liga_af = MAPA_LIGAS_API_FOOTBALL.get(liga)
 
+        # AGORA BUSCA RESULTADO FINAL (h2h) e OVER/UNDER (totals)
         url = f"https://api.the-odds-api.com/v4/sports/{liga}/odds/"
-        params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h"}
+        params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h,totals"}
 
         try:
             resposta = requests.get(url, params=params)
@@ -206,8 +190,21 @@ def buscar_jogos_do_dia():
                     bookmakers = jogo.get('bookmakers', [])
                     if bookmakers:
                         bm = next((b for b in bookmakers if b['key'] == 'betano'), bookmakers[0])
-                        outcomes = bm['markets'][0]['outcomes']
-                        odds = " / ".join(f"{o['name']}: {o['price']}" for o in outcomes)
+                        
+                        # Formatando os múltiplos mercados para a IA
+                        odds_str_list = []
+                        for market in bm['markets']:
+                            m_key = market['key'].upper()
+                            outcomes_list = []
+                            for o in market['outcomes']:
+                                name = o.get('name', '')
+                                point = f" {o.get('point')}" if o.get('point') is not None else ""
+                                price = o.get('price', '')
+                                outcomes_list.append(f"{name}{point}: {price}")
+                            odds_str_list.append(f"[{m_key}] {' / '.join(outcomes_list)}")
+                        
+                        odds_finais = " | ".join(odds_str_list)
+                        
                         resumo_casa = encontrar_resumo_time(tabela_liga, jogo['home_team'])
                         resumo_fora = encontrar_resumo_time(tabela_liga, jogo['away_team'])
 
@@ -225,7 +222,7 @@ def buscar_jogos_do_dia():
                             f"LIGA: {liga} | DATA: {data_jogo} | \n"
                             f"CASA: {jogo['home_team']} (Tabela: {resumo_casa}) \n"
                             f"FORA: {jogo['away_team']} (Tabela: {resumo_fora}) \n"
-                            f"ODDS: {odds} \n"
+                            f"ODDS: {odds_finais} \n"
                             f"EXTRAS: {info_arbitro} | {info_clima}\n"
                             f"-" * 40
                         )
@@ -238,13 +235,12 @@ def buscar_jogos_do_dia():
 
     LIMITE_MAXIMO_JOGOS = 60
     if len(jogos_disponiveis) > LIMITE_MAXIMO_JOGOS:
-        print(f"Aviso: {len(jogos_disponiveis)} jogos encontrados, cortando para os primeiros {LIMITE_MAXIMO_JOGOS}.")
         jogos_disponiveis = jogos_disponiveis[:LIMITE_MAXIMO_JOGOS]
 
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 4. FUNÇÃO: ANALISAR COM IA (PROMPT MASTER)
+# 4. FUNÇÃO: ANALISAR COM IA (PROMPT MASTER EVOLUÍDO)
 # ==========================================
 def analisar_com_ia_unificada(lista_de_jogos):
     if not lista_de_jogos: return "Nenhum jogo encontrado."
@@ -253,33 +249,34 @@ def analisar_com_ia_unificada(lista_de_jogos):
     Você é Analista Sênior de Sports Trading na Betano, postura de "Advogado do Diabo" (cético, rigoroso).
     MISSÃO: montar 1 múltipla (odd ~20.00), só com jogos da MESMA DATA (escolha 1 dia e monte tudo nele).
 
-    REGRAS (aplique todas):
-    1. Médias: use posição, pontos, saldo, médias Gols Pró/Contra de cada time. Prefira confrontos com defesa sólida x ataque ineficiente.
-    2. Escanteios: se favorito tende a abrir placar cedo, evite cantos a favor dele; evite cantos contra bloco baixo.
-    3. Contexto: cruze necessidade de pontos na tabela (título/G4/rebaixamento/sem ambição); clima adverso (chuva/vento forte) pesa p/ Under Gols ou jogo mais físico; árbitro identificado só embasa cartões com dado real, nunca suposição.
-    4. Valor: descarte odds ≤1.25 (trap odds); você pode colocar mais de um mercado por partida se for pertinente.
-    5. Anti-alucinação: use só os números fornecidos (gols, pontos, saldo, forma, árbitro, clima). Dado "não disponível/não localizado" = não cite, não invente.
-    6. Grade fraca: se não sustentar Odd 20 com segurança, monte assim mesmo, mas abra com [⚠️ AVISO DE RISCO DESTACADO].
+    REGRAS DE OURO (aplique todas rigorosamente):
+    1. Análise de Médias: use posição, pontos, saldo, e médias exatas de Gols Pró/Contra da tabela.
+    2. Condições de Clima e Árbitro: Clima adverso (chuva/vento forte) favorece Under Gols ou Ambas Não Marcam; Árbitros rigorosos justificam mercados de cartões, se coerente com a tensão da partida (Ex: clássicos ou brigas por rebaixamento).
+    3. EXPLORAÇÃO INTELIGENTE DE MERCADOS: Você NÃO está preso ao mercado de Vencedor (1X2). Se a análise apontar alto risco de zebra ou equilíbrio excessivo, você tem TOTAL LIBERDADE para adotar mercados alternativos como Dupla Chance (1X/X2), Empate Anula Aposta (DNB), Over/Under Gols (ex: Over 1.5, Under 2.5), Ambas Marcam (BTTS), Over Gols no 1º Tempo (HT), Escanteios ou Cartões. 
+    (ATENÇÃO: Use esses mercados como "blindagem" para a aposta, NÃO os aplique como regra forçada se o Vencedor 1X2 tiver margem clara de segurança. Caso a odd exata do mercado alternativo escolhido não conste no texto, estime-a de forma justa, conservadora e baseada na probabilidade matemática do H2H fornecido).
+    4. Valor: Descarte trap odds (≤1.25) que não compensam o risco de variância na múltipla.
+    5. Anti-alucinação: Só cite dados (gols, pontos, clima, árbitro) que existam no texto. Dado ausente = não cite.
+    6. Grade fraca: se não houver embasamento para Odd 20 segura, abra com [⚠️ AVISO DE RISCO DESTACADO].
 
-    FORMATO DE SAÍDA (Telegram, seguir exatamente):
+    FORMATO DE SAÍDA EXIGIDO (Telegram):
     ### 🎯 BILHETE MÚLTIPLO DE VALOR | DATA: [DD/MM/AAAA]
     [⚠️ AVISO DE RISCO: só se grade fraca]
     Odd Combinada Total: [XX.XX] | Gestão de Banca: 0.20u
 
     | Jogo | Liga | Mercado | Odd | Justificativa Enxuta |
     |:---|:---|:---|:---|:---|
-    | [Time A vs Time B] | [Liga] | [Mercado] | [Odd] | [resumo] |
+    | [Time A vs Time B] | [Liga] | [Mercado Escolhido (ex: Dupla Chance Casa)] | [Odd] | [resumo] |
     (linhas suficientes até ~odd 20)
 
     ---
-    ### 🔍 FUNDAMENTAÇÃO TÁTICA
-    Pra cada jogo do bilhete:
+    ### 🔍 FUNDAMENTAÇÃO TÁTICA E PROTEÇÃO DE MERCADO
+    Pra cada jogo do bilhete, detalhe o rigor aplicado:
     ⚽ **[Time A] vs [Time B]**
-    - **Tabela e Médias:** [pontos, posição, saldo, médias Pró/Contra reais]
-    - **Contexto Extra:** [árbitro/clima, só se relevantes e disponíveis]
-    - **Risco / Game Script:** [cenário tático, necessidade de vitória, por que o mercado resiste ao rigor analítico]
+    - **Tabela e Médias:** [pontos, posição, médias Pró/Contra reais]
+    - **Contexto Extra:** [Impacto do clima/árbitro, se disponíveis e relevantes]
+    - **Leitura do Mercado:** [Justifique por que você escolheu ESTE mercado específico em vez de outro. Ex: "Fugi do Vencedor 1X2 devido à inconsistência do visitante, preferindo Dupla Chance 1X para blindar o risco" ou "Médias altas de Gols Pró justificam o Over 2.5"]
 
-    JOGOS E DADOS REAIS (Tabela, Árbitro, Clima):
+    JOGOS E DADOS REAIS:
     {lista_de_jogos}
     """
 
@@ -300,7 +297,7 @@ def analisar_com_ia_unificada(lista_de_jogos):
             ultimo_erro = e
             continue
 
-    return f"Erro crítico: Todas as {len(GEMINI_KEYS)} chaves falharam. Último erro: {ultimo_erro}"
+    return f"Erro crítico: Todas as chaves falharam. Último erro: {ultimo_erro}"
 
 # ==========================================
 # 5. FUNÇÃO: ENVIAR PARA O TELEGRAM
@@ -324,14 +321,14 @@ def enviar_telegram(mensagem):
 # 6. EXECUÇÃO PRINCIPAL
 # ==========================================
 if __name__ == "__main__":
-    print("Buscando jogos e processando tabelas...")
+    print("Buscando jogos e processando tabelas e odds (H2H e Totais)...")
     grade = buscar_jogos_do_dia()
 
     if not grade:
         print("Nenhum jogo encontrado.")
         exit()
 
-    print("Iniciando análise com Gemini...")
+    print("Iniciando análise com Gemini... Orientando para exploração inteligente de mercados.")
     resposta_ia = analisar_com_ia_unificada(grade)
 
     if "Erro crítico" in resposta_ia:
