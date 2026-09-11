@@ -2,8 +2,8 @@ name: Executar Robo Betano Diariamente
 
 on:
   schedule:
-    # Roda todo dia às 10h00 BRT (13h00 UTC)
-    - cron: '0 13 * * *'
+    # Roda todo dia às 08h00 BRT (11h00 UTC)
+    - cron: '0 11 * * *'
   workflow_dispatch: # Permite continuar rodando manualmente pelo botão "Run workflow"
 
 jobs:
