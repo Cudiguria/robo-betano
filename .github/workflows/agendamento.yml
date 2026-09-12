@@ -22,7 +22,7 @@ jobs:
       - name: Instalar bibliotecas
         run: |
           python -m pip install --upgrade pip
-          pip install requests google-genai pandas lxml html5lib
+          pip install requests google-genai pandas lxml html5lib beautifulsoup4
 
       - name: Executar o robô
         env:
