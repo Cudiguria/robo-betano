@@ -81,6 +81,7 @@ SUFIXOS_SOCIETARIOS = [
 # canônico normalizado. Adicione aqui sempre que o log apontar uma
 # falha de correspondência que se repete.
 APELIDOS_MANUAIS = {
+    # Inglaterra
     "spurs": "tottenham hotspur",
     "tottenham": "tottenham hotspur",
     "man utd": "manchester united",
@@ -95,6 +96,8 @@ APELIDOS_MANUAIS = {
     "newcastle": "newcastle united",
     "west ham": "west ham united",
     "brighton": "brighton hove albion",
+    
+    # Europa
     "bayern munich": "bayern munchen",
     "bayern": "bayern munchen",
     "dortmund": "borussia dortmund",
@@ -105,11 +108,20 @@ APELIDOS_MANUAIS = {
     "atleti": "atletico de madrid",
     "psg": "paris saint germain",
     "paris sg": "paris saint germain",
-    "atletico paranaense": "ca paranaense",
-    "bragantinosp": "red bull bragantino",
     "athletic bilbao": "athletic club",
     "celta vigo": "rc celta de vigo",
-    "rc lens": "racing club de lens"
+    "rc lens": "racing club de lens",
+
+    # Brasil
+    "atletico mineiro": "clube atletico mineiro",
+    "atletico mg": "clube atletico mineiro",
+    "atletico paranaense": "ca paranaense",
+    "athletico pr": "ca paranaense",
+    "bragantinosp": "red bull bragantino",
+    "bragantino": "red bull bragantino",
+    "rb bragantino": "red bull bragantino",
+    "vasco": "cr vasco da gama",
+    "vasco da gama": "cr vasco da gama"
 }
 
 def normalizar_nome(nome):
