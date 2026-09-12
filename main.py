@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import math
 import time
 import requests
 import unicodedata
@@ -14,7 +15,6 @@ from google.genai import types
 # ==========================================
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "").strip()
 FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY", "").strip()
-APIOPENWEATHER_KEY = os.getenv("APIOPENWEATHER_KEY", "").strip()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -42,6 +42,12 @@ MAPA_COMPETICOES_FOOTBALL_DATA = {
     "soccer_france_ligue_one": "FL1", "soccer_efl_champ": "ELC"
 }
 
+# Arquivo de histórico de bilhetes enviados (usado pra graduar green/red depois).
+# IMPORTANTE: em GitHub Actions o runner é efêmero — sem um passo de
+# "git commit/push" desse arquivo de volta pro repo (ou um storage externo),
+# ele é perdido a cada execução e o histórico nunca acumula. Ver nota no chat.
+HISTORICO_PATH = "historico_apostas.json"
+
 # ==========================================
 # 2. NORMALIZAÇÃO DE NOMES
 # ==========================================
@@ -66,10 +72,10 @@ APELIDOS_MANUAIS = {
     "psg": "paris saint germain", "paris sg": "paris saint germain",
     "athletic bilbao": "athletic club", "celta vigo": "rc celta de vigo",
     "rc lens": "racing club de lens",
-    "atletico mineiro": "atletico mineiro", "clube atletico mineiro": "atletico mineiro", 
-    "atletico mg": "atletico mineiro", "atletico paranaense": "ca paranaense", 
-    "athletico pr": "ca paranaense", "bragantinosp": "red bull bragantino", 
-    "bragantino": "red bull bragantino", "rb bragantino": "red bull bragantino", 
+    "atletico mineiro": "atletico mineiro", "clube atletico mineiro": "atletico mineiro",
+    "atletico mg": "atletico mineiro", "atletico paranaense": "ca paranaense",
+    "athletico pr": "ca paranaense", "bragantinosp": "red bull bragantino",
+    "bragantino": "red bull bragantino", "rb bragantino": "red bull bragantino",
     "vasco": "cr vasco da gama", "vasco da gama": "cr vasco da gama"
 }
 
@@ -105,9 +111,10 @@ def buscar_em_dicionario(dicionario, nome_time):
     return None
 
 # ==========================================
-# 3. FONTES DE DADOS (Tabela e Clima)
+# 3. FONTE DE DADOS: TABELA (football-data.org)
 # ==========================================
 def buscar_tabela_competicao(codigo_competicao):
+    """Retorna dict: chave_canonica(time) -> {texto, media_pro, media_contra}"""
     if not FOOTBALL_DATA_API_KEY or not codigo_competicao: return {}
     url = f"https://api.football-data.org/v4/competitions/{codigo_competicao}/standings"
     headers = {"X-Auth-Token": FOOTBALL_DATA_API_KEY}
@@ -129,31 +136,78 @@ def buscar_tabela_competicao(codigo_competicao):
                     f"Saldo: {time_dados['goalDifference']} | Média Gols Pró: {media_pro} | "
                     f"Média Gols Contra: {media_contra} | Forma: {forma}"
                 )
-                tabela[chave_canonica(nome)] = resumo
+                tabela[chave_canonica(nome)] = {
+                    "texto": resumo,
+                    "media_pro": media_pro,
+                    "media_contra": media_contra
+                }
         return tabela
     except Exception:
         return {}
 
-def buscar_clima_da_liga(liga):
-    mapa_clima = {
-        "soccer_epl": "London", "soccer_brazil_campeonato": "São Paulo",
-        "soccer_spain_la_liga": "Madrid", "soccer_italy_serie_a": "Rome",
-        "soccer_germany_bundesliga": "Berlin", "soccer_france_ligue_one": "Paris"
+# ==========================================
+# 4. MODELO ESTATÍSTICO (Poisson) — NOVO
+# ==========================================
+def _poisson_pmf(k, lam):
+    if lam <= 0:
+        return 1.0 if k == 0 else 0.0
+    return math.exp(-lam) * (lam ** k) / math.factorial(k)
+
+def calcular_probabilidades_poisson(exp_casa, exp_fora, max_gols=6):
+    """Modelo simples de Poisson independente (sem ajuste de liga/mando de campo
+    além da própria média de gols pró/contra). É uma aproximação, não uma
+    predição precisa — serve pra dar um número de referência ao invés de
+    decisão puramente narrativa."""
+    p_casa = p_empate = p_fora = p_over25 = 0.0
+    for i in range(max_gols + 1):
+        for j in range(max_gols + 1):
+            p = _poisson_pmf(i, exp_casa) * _poisson_pmf(j, exp_fora)
+            if i > j: p_casa += p
+            elif i == j: p_empate += p
+            else: p_fora += p
+            if i + j >= 3: p_over25 += p
+    return {
+        "casa": p_casa, "empate": p_empate, "fora": p_fora,
+        "over25": p_over25, "under25": 1 - p_over25
     }
-    cidade = mapa_clima.get(liga)
-    if not APIOPENWEATHER_KEY or not cidade: return "Clima não disponível"
-    url = "https://api.openweathermap.org/data/2.5/weather"
-    params = {"q": cidade, "appid": APIOPENWEATHER_KEY, "units": "metric", "lang": "pt_br"}
-    try:
-        resposta = requests.get(url, params=params, timeout=10)
-        resposta.raise_for_status()
-        dados = resposta.json()
-        return f"{cidade}: {dados['main']['temp']}°C, {dados['weather'][0]['description']}"
-    except Exception:
-        return "Clima não disponível"
+
+def probabilidades_implicitas_sem_vig(odds_dict):
+    """Remove a margem da casa (overround) normalizando as probabilidades
+    implícitas (1/odd) pra somarem 100%. Sem isso, a comparação com o modelo
+    fica injustamente pessimista pro lado do modelo."""
+    implicitas = {k: (1 / v) for k, v in odds_dict.items() if v}
+    soma = sum(implicitas.values())
+    if soma == 0: return {}
+    return {k: v / soma for k, v in implicitas.items()}
+
+def montar_texto_modelo(home_team, away_team, resumo_casa, resumo_fora, odds_h2h, odds_totals_25):
+    if not (isinstance(resumo_casa, dict) and isinstance(resumo_fora, dict)):
+        return "MODELO: indisponível (faltam médias de gols na tabela pra um dos dois times)"
+
+    exp_casa = (resumo_casa["media_pro"] + resumo_fora["media_contra"]) / 2
+    exp_fora = (resumo_fora["media_pro"] + resumo_casa["media_contra"]) / 2
+    probs = calcular_probabilidades_poisson(exp_casa, exp_fora)
+
+    partes = [f"Casa {probs['casa']*100:.0f}% / Empate {probs['empate']*100:.0f}% / Fora {probs['fora']*100:.0f}%"]
+
+    if odds_h2h:
+        fair = probabilidades_implicitas_sem_vig(odds_h2h)
+        for nome, prob_modelo in [(home_team, probs['casa']), ("Draw", probs['empate']), (away_team, probs['fora'])]:
+            prob_odd = fair.get(nome)
+            if prob_odd is not None and prob_modelo - prob_odd >= 0.03:
+                partes.append(f"[VALOR em {nome}: modelo {prob_modelo*100:.0f}% vs mercado {prob_odd*100:.0f}%]")
+
+    if odds_totals_25:
+        fair_t = probabilidades_implicitas_sem_vig(odds_totals_25)
+        for nome, prob_modelo in [("Over", probs['over25']), ("Under", probs['under25'])]:
+            prob_odd = fair_t.get(nome)
+            if prob_odd is not None and prob_modelo - prob_odd >= 0.03:
+                partes.append(f"[VALOR em {nome} 2.5: modelo {prob_modelo*100:.0f}% vs mercado {prob_odd*100:.0f}%]")
+
+    return "MODELO (Poisson, baseado em médias reais de gols): " + " | ".join(partes)
 
 # ==========================================
-# 4. ETAPA 1: BUSCAR ODDS E MONTAR BASE
+# 5. ETAPA 1: BUSCAR ODDS E MONTAR BASE
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
@@ -165,7 +219,6 @@ def buscar_jogos_do_dia():
         if codigo_fd and codigo_fd not in tabelas_cache:
             tabelas_cache[codigo_fd] = buscar_tabela_competicao(codigo_fd)
         tabela_liga = tabelas_cache.get(codigo_fd, {})
-        clima_liga = buscar_clima_da_liga(liga)
 
         url = f"https://api.the-odds-api.com/v4/sports/{liga}/odds/"
         params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h,totals,spreads"}
@@ -178,6 +231,9 @@ def buscar_jogos_do_dia():
                     bookmakers = jogo.get('bookmakers', [])
                     if bookmakers:
                         bm = next((b for b in bookmakers if b['key'] == 'betano'), bookmakers[0])
+
+                        odds_h2h = {}
+                        odds_totals_25 = {}
                         odds_str_list = []
                         for market in bm['markets']:
                             m_key = market['key'].upper()
@@ -185,16 +241,27 @@ def buscar_jogos_do_dia():
                             for o in market['outcomes'][:6]:
                                 point = f" {o.get('point')}" if o.get('point') is not None else ""
                                 outcomes_list.append(f"{o.get('name')}{point}: {o.get('price')}")
+                                if market['key'] == 'h2h' and o.get('price'):
+                                    odds_h2h[o.get('name')] = o.get('price')
+                                if market['key'] == 'totals' and o.get('point') == 2.5 and o.get('price'):
+                                    odds_totals_25[o.get('name')] = o.get('price')
                             odds_str_list.append(f"[{m_key}] {' / '.join(outcomes_list)}")
-                        
-                        resumo_casa = buscar_em_dicionario(tabela_liga, jogo['home_team']) or "Sem dados de tabela"
-                        resumo_fora = buscar_em_dicionario(tabela_liga, jogo['away_team']) or "Sem dados de tabela"
+
+                        resumo_casa = buscar_em_dicionario(tabela_liga, jogo['home_team'])
+                        resumo_fora = buscar_em_dicionario(tabela_liga, jogo['away_team'])
+                        texto_casa = resumo_casa["texto"] if isinstance(resumo_casa, dict) else "Sem dados de tabela"
+                        texto_fora = resumo_fora["texto"] if isinstance(resumo_fora, dict) else "Sem dados de tabela"
+                        modelo_texto = montar_texto_modelo(
+                            jogo['home_team'], jogo['away_team'],
+                            resumo_casa, resumo_fora, odds_h2h, odds_totals_25
+                        )
 
                         info_jogo = (
-                            f"LIGA: {liga} | DATA: {data_jogo} | {clima_liga} \n"
-                            f"CASA: {jogo['home_team']} (Tabela: {resumo_casa}) \n"
-                            f"FORA: {jogo['away_team']} (Tabela: {resumo_fora}) \n"
+                            f"LIGA: {liga} | DATA: {data_jogo} \n"
+                            f"CASA: {jogo['home_team']} (Tabela: {texto_casa}) \n"
+                            f"FORA: {jogo['away_team']} (Tabela: {texto_fora}) \n"
                             f"ODDS: {' | '.join(odds_str_list)} \n"
+                            f"{modelo_texto} \n"
                             f"-" * 40
                         )
                         jogos_disponiveis.append(info_jogo)
@@ -208,7 +275,7 @@ def buscar_jogos_do_dia():
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 5. ETAPA 1: IA MONTA MÚLTIPLA CANDIDATA
+# 6. ETAPA 1: IA MONTA MÚLTIPLA CANDIDATA
 # ==========================================
 def analisar_com_ia_candidata(lista_de_jogos):
     prompt_master = f"""
@@ -216,14 +283,24 @@ def analisar_com_ia_candidata(lista_de_jogos):
     MISSÃO: montar 1 múltipla candidata (odd ~20.00), com jogos do texto abaixo.
 
     REGRAS DE OURO:
-    1. Baseie-se apenas em posição, saldo, forma recente e odds apresentadas.
-    2. Como você ainda não tem os dados de Escanteios e Cartões exatos, se quiser explorar esses mercados agora, faça-o baseado puramente em Inferência Tática.
-    3. Você PODE incluir duas seleções para o mesmo jogo (ex: Vencedor + Escanteios).
+    1. Baseie-se em posição, saldo, forma recente, odds e, principalmente, na linha MODELO
+       (probabilidade calculada via Poisson a partir de médias reais de gols). Quando o MODELO
+       marcar [VALOR] em um mercado, isso é um sinal estatístico real — priorize esses mercados.
+       Quando o MODELO estiver indisponível para um jogo, trate a escolha ali como mais especulativa.
+    2. Só use mercados com dado real por trás: vencedor (H2H) e Over/Under de gols (TOTALS).
+       Não invente ou infira estatísticas de escanteios/cartões — não há dado confiável pra isso
+       nesta versão do robô, então NÃO inclua esses mercados.
+    3. NÃO combine duas seleções do mesmo jogo (ex: vencedor + over gols do mesmo confronto),
+       mesmo que pareça aumentar a odd — mercados do mesmo jogo costumam ser correlacionados
+       (ex: time favorito vencer e o jogo ter mais gols andam juntos), e isso infla a odd
+       combinada sem valor estatístico real correspondente. Uma seleção por jogo.
 
     FORMATO OBRIGATÓRIO:
-    Responda apenas com o texto da múltipla e as justificativas breves. 
-    NO FINAL DA MENSAGEM, adicione exatamente a tag ###JOGOS_ESCOLHIDOS### e abaixo dela um JSON com os nomes dos times que você escolheu:
-    [{{"home": "Time A", "away": "Time B"}}, ...]
+    Responda apenas com o texto da múltipla e as justificativas breves (cite o MODELO quando usar).
+    NO FINAL DA MENSAGEM, adicione exatamente a tag ###JOGOS_ESCOLHIDOS### e abaixo dela um JSON
+    com os jogos escolhidos, incluindo o mercado e a seleção exatos:
+    [{{"home": "Time A", "away": "Time B", "mercado": "H2H", "selecao": "Time A", "odd": 1.85}},
+     {{"home": "Time C", "away": "Time D", "mercado": "TOTALS", "selecao": "Over", "ponto": 2.5, "odd": 1.72}}]
 
     JOGOS DISPONÍVEIS:
     {lista_de_jogos}
@@ -254,7 +331,9 @@ def extrair_candidata(resposta):
     return texto.strip(), jogos
 
 # ==========================================
-# 6. ETAPA 2: IA "GOOGLA" OS JOGOS ESCOLHIDOS (10 ÚLTIMOS JOGOS + CONFRONTOS DIRETOS)
+# 7. ETAPA 2: IA "GOOGLA" OS JOGOS ESCOLHIDOS
+#    (agora focada só no que os dados estruturados NÃO cobrem:
+#    desfalques de última hora e confrontos diretos recentes)
 # ==========================================
 def refinar_com_google_search(bilhete_candidato, jogos_escolhidos):
     if not jogos_escolhidos:
@@ -263,38 +342,40 @@ def refinar_com_google_search(bilhete_candidato, jogos_escolhidos):
     lista_jogos_str = ", ".join([f"{j.get('home')} vs {j.get('away')}" for j in jogos_escolhidos])
 
     prompt_refinamento = f"""
-    Você montou a seguinte múltipla candidata:
+    Você montou a seguinte múltipla candidata, já baseada em modelo estatístico (Poisson) e odds:
     {bilhete_candidato}
 
-    Você agora DEVE usar a sua ferramenta de Busca do Google (Google Search) para fazer uma PESQUISA PROFUNDA E DETALHADA sobre os seguintes confrontos:
+    Use a ferramenta de Busca do Google (Google Search) para checar, para cada confronto abaixo,
+    apenas o que os dados estruturados do robô NÃO cobrem:
     {lista_jogos_str}
 
-    PESQUISE ESPECIFICAMENTE ESTES PONTOS PARA CADA JOGO:
-    1. Desempenho e médias detalhadas nos ÚLTIMOS 10 JOGOS de cada equipe (gols marcados/sofridos, consistência).
-    2. Média de escanteios (cantos) com base nos jogos recentes da temporada.
-    3. Média de cartões (disciplina, amarelos e vermelhos) nos últimos confrontos e na temporada.
-    4. Histórico recente de CONFRONTOS DIRETOS entre as duas equipes (resultados dos últimos duelos diretos entre eles, sem focar em H2H abstrato, apenas o placar e dinâmica dos encontros passados).
+    PESQUISE ESPECIFICAMENTE:
+    1. Desfalques/lesões/suspensões de última hora que possam mudar o time titular esperado.
+    2. Histórico recente de CONFRONTOS DIRETOS entre as duas equipes (placar e dinâmica dos últimos encontros).
 
     🚨 REGRA ANTI-ALUCINAÇÃO:
-    Trabalhe APENAS com os dados reais retornados pela busca. Se faltar algum dado exato, escreva "Dado não localizado na busca". NUNCA invente estatísticas.
+    Trabalhe APENAS com os dados reais retornados pela busca. Se faltar algum dado exato, escreva
+    "Dado não localizado na busca". NUNCA invente estatísticas.
 
     TAREFA DE REFINAMENTO:
-    - Cruze o resultado da sua pesquisa profunda com o bilhete que você montou.
-    - Se os dados dos últimos 10 jogos e dos confrontos diretos confirmarem a tese, mantenha e enriqueça a justificativa técnica.
-    - Se os dados mostrarem riscos ocultos, TROQUE o mercado escolhido para algo mais seguro.
+    - Cruze o resultado da sua pesquisa com o bilhete que você montou.
+    - Se um desfalque relevante contradiz a tese estatística (ex: artilheiro suspenso), TROQUE o
+      mercado escolhido para algo mais seguro, ou remova essa perna se não houver alternativa segura.
+    - Caso contrário, mantenha e enriqueça a justificativa.
 
     FORMATO DE SAÍDA EXIGIDO:
-    Crie o bilhete final no padrão profissional do Telegram.
-    Na seção de 🔍 FUNDAMENTAÇÃO TÁTICA, ao final da explicação de CADA JOGO, adicione OBRIGATORIAMENTE esta linha exata preenchida com os dados da sua pesquisa:
+    Crie o bilhete final no padrão profissional do Telegram. Na seção de 🔍 FUNDAMENTAÇÃO TÁTICA,
+    ao final da explicação de CADA JOGO, adicione OBRIGATORIAMENTE esta linha exata:
 
-    **📊 Resumo Estatístico:** Média de escanteios: [X] | Média de Cartões: [X] | Histórico de confrontos diretos recentes: [Breve resumo dos últimos duelos] | Postura de jogo esperada: [Ex: Ataque contra Defesa]
+    **📊 Checagem:** Desfalques: [X] | Confrontos diretos recentes: [Breve resumo]
 
     Responda diretamente com o bilhete formatado.
     """
 
+    ultimo_erro_foi_quota = False
     for key in GEMINI_KEYS:
         try:
-            print(f"[Etapa 2] Ativando Agente com Google Search para pesquisa profunda (10 jogos + diretos) (Chave {key[-4:]})...")
+            print(f"[Etapa 2] Ativando Agente com Google Search (Chave {key[-4:]})...")
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
                 model='gemini-3.6-flash',
@@ -306,13 +387,181 @@ def refinar_com_google_search(bilhete_candidato, jogos_escolhidos):
             )
             return response.text
         except Exception as e:
-            print(f"Erro na Busca: {e}")
+            msg = str(e)
+            if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+                ultimo_erro_foi_quota = True
+                print(f"[Etapa 2] Cota de grounding esgotada na chave {key[-4:]}.")
+            else:
+                print(f"[Etapa 2] Erro na chave {key[-4:]}: {e}")
             continue
 
-    return bilhete_candidato
+    print("[Etapa 2] Todas as chaves falharam. Formatando fallback sem busca...")
+    return formatar_fallback_sem_busca(bilhete_candidato, ultimo_erro_foi_quota)
+
+
+def formatar_fallback_sem_busca(bilhete_candidato, foi_erro_de_quota):
+    aviso = (
+        "⚠️ Checagem de desfalques/confrontos diretos indisponível hoje "
+        "(cota de grounding esgotada no projeto)." if foi_erro_de_quota else
+        "⚠️ Checagem de desfalques/confrontos diretos indisponível hoje."
+    )
+
+    prompt_fallback = f"""
+    Reformate o texto abaixo no padrão profissional de bilhete para Telegram
+    (título, lista numerada de seleções com odd e justificativa breve, sem inventar
+    nenhuma estatística nova).
+
+    Para cada jogo, ao final da justificativa, adicione exatamente esta linha:
+    **📊 Checagem:** Dado não localizado na busca (checagem indisponível nesta execução).
+
+    No topo da mensagem, inclua esta linha de aviso, sem alterá-la:
+    {aviso}
+
+    TEXTO ORIGINAL:
+    {bilhete_candidato}
+    """
+    for key in GEMINI_KEYS:
+        try:
+            client = genai.Client(api_key=key)
+            response = client.models.generate_content(
+                model='gemini-3.6-flash',
+                contents=prompt_fallback,
+                config=types.GenerateContentConfig(temperature=0.1)
+            )
+            return response.text
+        except Exception:
+            continue
+
+    return f"{aviso}\n\n{bilhete_candidato}"
 
 # ==========================================
-# 7. TELEGRAM E EXECUÇÃO
+# 8. HISTÓRICO E VERIFICAÇÃO DE RESULTADOS — NOVO
+# ==========================================
+def carregar_historico():
+    if os.path.exists(HISTORICO_PATH):
+        try:
+            with open(HISTORICO_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def salvar_historico(historico):
+    try:
+        with open(HISTORICO_PATH, "w", encoding="utf-8") as f:
+            json.dump(historico, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[Histórico] Falha ao salvar: {e}")
+
+def registrar_bilhete(escolhidos):
+    if not escolhidos:
+        return
+    historico = carregar_historico()
+    historico.append({
+        "data_envio": datetime.now(timezone.utc).isoformat(),
+        "jogos": escolhidos,
+        "status": "pendente"
+    })
+    salvar_historico(historico)
+
+def _avaliar_selecao(jogo_registrado, placar_casa, placar_fora):
+    mercado = (jogo_registrado.get("mercado") or "").upper()
+    selecao = (jogo_registrado.get("selecao") or "").strip()
+
+    if mercado == "H2H":
+        if placar_casa > placar_fora:
+            vencedor = jogo_registrado["home"]
+        elif placar_fora > placar_casa:
+            vencedor = jogo_registrado["away"]
+        else:
+            vencedor = "Draw"
+        if selecao.lower() == "draw":
+            return "green" if vencedor == "Draw" else "red"
+        return "green" if times_equivalentes(vencedor, selecao) else "red"
+
+    if mercado == "TOTALS":
+        total = placar_casa + placar_fora
+        ponto = jogo_registrado.get("ponto", 2.5)
+        if "over" in selecao.lower():
+            return "green" if total > ponto else "red"
+        if "under" in selecao.lower():
+            return "green" if total < ponto else "red"
+
+    return "manual"  # spreads e outros mercados não são graduados automaticamente
+
+def verificar_resultados_pendentes():
+    """Confere, via endpoint de scores da própria Odds API, o resultado real
+    dos bilhetes ainda pendentes e grada green/red. Retorna um resumo em texto
+    (ou None se não houver nada novo pra reportar)."""
+    historico = carregar_historico()
+    pendentes = [h for h in historico if h["status"] == "pendente"]
+    if not pendentes:
+        return None
+
+    placares_por_liga = {}
+    for liga in LIGAS:
+        url = f"https://api.the-odds-api.com/v4/sports/{liga}/scores/"
+        params = {"apiKey": ODDS_API_KEY, "daysFrom": 3}
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            placares_por_liga[liga] = resp.json()
+        except Exception:
+            placares_por_liga[liga] = []
+
+    recem_verificados = []
+    for entrada in pendentes:
+        todos_resolvidos = True
+        for jogo in entrada["jogos"]:
+            if jogo.get("resultado") in ("green", "red", "manual"):
+                continue
+            encontrado = False
+            for resultados_liga in placares_por_liga.values():
+                for r in resultados_liga:
+                    if not r.get("completed"):
+                        continue
+                    if not (times_equivalentes(r.get("home_team", ""), jogo["home"]) and
+                            times_equivalentes(r.get("away_team", ""), jogo["away"])):
+                        continue
+                    scores = {s["name"]: int(s["score"]) for s in r.get("scores", []) if s.get("score") is not None}
+                    placar_casa = next((v for k, v in scores.items() if times_equivalentes(k, jogo["home"])), None)
+                    placar_fora = next((v for k, v in scores.items() if times_equivalentes(k, jogo["away"])), None)
+                    if placar_casa is None or placar_fora is None:
+                        continue
+                    jogo["placar"] = f"{placar_casa}x{placar_fora}"
+                    jogo["resultado"] = _avaliar_selecao(jogo, placar_casa, placar_fora)
+                    encontrado = True
+                    break
+                if encontrado:
+                    break
+            if not encontrado:
+                todos_resolvidos = False
+        if todos_resolvidos:
+            entrada["status"] = "verificado"
+            recem_verificados.append(entrada)
+
+    salvar_historico(historico)
+
+    if not recem_verificados:
+        return None
+
+    todos_graduados = [j for e in historico if e["status"] == "verificado" for j in e["jogos"] if j.get("resultado") in ("green", "red")]
+    if not todos_graduados:
+        return None
+    greens = sum(1 for j in todos_graduados if j["resultado"] == "green")
+    total = len(todos_graduados)
+    taxa = (greens / total * 100) if total else 0
+
+    linhas = [f"📈 *Resultados verificados agora:*"]
+    for entrada in recem_verificados:
+        for j in entrada["jogos"]:
+            emoji = "✅" if j.get("resultado") == "green" else ("❌" if j.get("resultado") == "red" else "➖")
+            linhas.append(f"{emoji} {j['home']} x {j['away']} ({j.get('mercado','?')}: {j.get('selecao','?')}) — {j.get('placar','?')}")
+    linhas.append(f"\n*Taxa de acerto histórica (seleções graduáveis): {greens}/{total} = {taxa:.0f}%*")
+    return "\n".join(linhas)
+
+# ==========================================
+# 9. TELEGRAM E EXECUÇÃO
 # ==========================================
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -326,7 +575,12 @@ def enviar_telegram(mensagem):
             requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": pedaco})
 
 if __name__ == "__main__":
-    print("Iniciando Robô Trader (Versão Definitiva - Agente Web Profundo)...")
+    print("Iniciando Robô Trader (Versão Analítica - Modelo + Histórico)...")
+
+    resumo_resultados = verificar_resultados_pendentes()
+    if resumo_resultados:
+        enviar_telegram(resumo_resultados)
+
     grade = buscar_jogos_do_dia()
     if not grade:
         print("Sem jogos.")
@@ -334,7 +588,7 @@ if __name__ == "__main__":
 
     print("Etapa 1: Analisando e gerando candidata...")
     resposta_bruta = analisar_com_ia_candidata(grade)
-    
+
     if "Erro Crítico" in resposta_bruta:
         enviar_telegram(f"❌ {resposta_bruta}")
         exit()
@@ -342,10 +596,11 @@ if __name__ == "__main__":
     candidata, escolhidos = extrair_candidata(resposta_bruta)
 
     if escolhidos:
-        print(f"Etapa 2: IA pesquisando {len(escolhidos)} jogos no Google (10 últimos jogos + confrontos diretos)...")
+        print(f"Etapa 2: IA checando desfalques e confrontos diretos de {len(escolhidos)} jogo(s)...")
         bilhete_final = refinar_com_google_search(candidata, escolhidos)
     else:
         bilhete_final = candidata
 
     enviar_telegram(bilhete_final.strip())
+    registrar_bilhete(escolhidos)
     print("\nConcluído!")
