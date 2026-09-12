@@ -4,6 +4,7 @@ import time
 import requests
 import unicodedata
 import pandas as pd
+from io import StringIO
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from google import genai
@@ -167,7 +168,7 @@ def raspar_dados_fbref(liga):
     try:
         time.sleep(3)
         resposta = requests.get(link, headers=headers, timeout=15)
-        tabelas = pd.read_html(resposta.text)
+        tabelas = pd.read_html(StringIO(resposta.text))
         df = tabelas[0]
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(0)
