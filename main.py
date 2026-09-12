@@ -104,6 +104,11 @@ APELIDOS_MANUAIS = {
     "atleti": "atletico de madrid",
     "psg": "paris saint germain",
     "paris sg": "paris saint germain",
+    "atletico paranaense": "ca paranaense",
+    "bragantinosp": "red bull bragantino",
+    "athletic bilbao": "athletic club",
+    "celta vigo": "rc celta de vigo",
+    "rc lens": "racing club de lens"
 }
 
 def normalizar_nome(nome):
