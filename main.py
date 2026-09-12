@@ -176,14 +176,39 @@ def raspar_dados_fbref(liga):
     link = MAPA_LIGAS_FBREF.get(liga)
     if not link: return {}
 
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    # 1. Camuflagem: Fingimos ser um navegador Google Chrome no Windows
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://www.google.com/'
+    }
+    
     try:
         time.sleep(3)
         resposta = requests.get(link, headers=headers, timeout=15)
-        tabelas = pd.read_html(StringIO(resposta.text))
-        df = tabelas[0]
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(0)
+        resposta.raise_for_status() # Verifica se fomos bloqueados por IP (Erro 403 ou 429)
+
+        # 2. O Truque Mágico: Removemos os comentários HTML que escondem as tabelas
+        html_limpo = resposta.text.replace('<!--', '').replace('-->', '')
+
+        # Lemos o HTML limpo
+        from io import StringIO
+        tabelas = pd.read_html(StringIO(html_limpo))
+
+        # 3. Varredura Inteligente: O FBref tem dezenas de tabelas por página. 
+        # Vamos procurar a primeira que tenha a coluna 'Squad' (Time)
+        df = None
+        for tabela in tabelas:
+            if isinstance(tabela.columns, pd.MultiIndex):
+                tabela.columns = tabela.columns.droplevel(0)
+            if 'Squad' in tabela.columns:
+                df = tabela
+                break
+
+        if df is None:
+            print(f"Aviso: Tabela 'Squad' não encontrada no HTML limpo para {liga}.")
+            return {}
 
         dados_avancados = {}
         for _, linha in df.iterrows():
@@ -198,10 +223,13 @@ def raspar_dados_fbref(liga):
             dados_avancados[chave_canonica(nome_time)] = resumo
 
         return dados_avancados
+    
+    except requests.exceptions.HTTPError as e:
+        print(f"Aviso: FBref bloqueou o IP do GitHub (Erro HTTP) para {liga}: {e}")
+        return {}
     except Exception as e:
         print(f"Aviso: falha ao raspar FBref para {liga}: {e}")
         return {}
-
 # ==========================================
 # 4. TABELA/FORMA (football-data.org)
 # ==========================================
