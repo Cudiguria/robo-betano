@@ -2,7 +2,9 @@ import os
 import re
 import time
 import requests
+import unicodedata
 import pandas as pd
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from google import genai
 from google.genai import types
@@ -59,22 +61,103 @@ def temporada_atual():
     hoje = datetime.now(timezone.utc)
     return hoje.year if hoje.month >= 7 else hoje.year - 1
 
-def limpar_nome_time(nome):
-    if not nome: return ""
-    nome = nome.lower()
-    sufixos = [" fc", " cfb", " cf", " ca", " cd", " afc", " 04", " sv", " bvb", " sc"]
-    for sufixo in sufixos:
-        nome = nome.replace(sufixo, "")
+# ==========================================
+# 2. NORMALIZAÇÃO DE NOMES DE TIMES
+#    (normaliza + resolve apelidos conhecidos + fuzzy match como
+#    último recurso — evita ter que listar manualmente todo time)
+# ==========================================
+
+# Sufixos societários comuns que cada fonte pode ou não incluir.
+SUFIXOS_SOCIETARIOS = [
+    ' fc', ' cf', ' cfb', ' ca', ' cd', ' afc', ' se', ' ac', ' sv',
+    ' bvb', ' sc', ' fk', ' as', ' ud', ' rc', ' ec', ' fsv', ' vfb',
+    ' tsg', ' ssc', ' us', ' cfc', ' sd'
+]
+
+# Apelidos/abreviações que NÃO compartilham letras suficientes com o
+# nome completo pra o fuzzy match resolver sozinho (ex: "Spurs" não
+# "parece" com "Tottenham"). Chave = apelido normalizado, valor = nome
+# canônico normalizado. Adicione aqui sempre que o log apontar uma
+# falha de correspondência que se repete.
+APELIDOS_MANUAIS = {
+    "spurs": "tottenham hotspur",
+    "tottenham": "tottenham hotspur",
+    "man utd": "manchester united",
+    "man united": "manchester united",
+    "manchester utd": "manchester united",
+    "man city": "manchester city",
+    "wolves": "wolverhampton wanderers",
+    "wolverhampton": "wolverhampton wanderers",
+    "nottm forest": "nottingham forest",
+    "nott ham forest": "nottingham forest",
+    "leicester": "leicester city",
+    "newcastle": "newcastle united",
+    "west ham": "west ham united",
+    "brighton": "brighton hove albion",
+    "bayern munich": "bayern munchen",
+    "bayern": "bayern munchen",
+    "dortmund": "borussia dortmund",
+    "inter": "internazionale",
+    "inter milan": "internazionale",
+    "ac milan": "milan",
+    "atletico madrid": "atletico de madrid",
+    "atleti": "atletico de madrid",
+    "psg": "paris saint germain",
+    "paris sg": "paris saint germain",
+}
+
+def normalizar_nome(nome):
+    """Minúsculo, sem acento, sem sufixo societário, sem pontuação."""
+    if not nome:
+        return ""
+    nome = nome.lower().strip()
+    nome = ''.join(c for c in unicodedata.normalize('NFD', nome) if unicodedata.category(c) != 'Mn')
+    for sufixo in SUFIXOS_SOCIETARIOS:
+        if nome.endswith(sufixo):
+            nome = nome[:-len(sufixo)]
+            break
     nome = re.sub(r'[^\w\s]', '', nome).strip()
+    nome = re.sub(r'\s+', ' ', nome)
     return nome
 
+def chave_canonica(nome):
+    """Normaliza e resolve apelidos conhecidos pro nome 'oficial' comum."""
+    n = normalizar_nome(nome)
+    return APELIDOS_MANUAIS.get(n, n)
+
+def times_equivalentes(nome_a, nome_b, limiar=0.82):
+    """True se dois nomes de time provavelmente são o mesmo clube."""
+    ca, cb = chave_canonica(nome_a), chave_canonica(nome_b)
+    if not ca or not cb:
+        return False
+    if ca == cb:
+        return True
+    if ca in cb or cb in ca:
+        return True
+    return SequenceMatcher(None, ca, cb).ratio() >= limiar
+
+def buscar_em_dicionario(dicionario, nome_time, contexto=""):
+    """
+    Procura nome_time nas chaves de dicionario usando correspondência
+    aproximada. Se não achar, imprime um aviso no log com o nome que
+    faltou — assim dá pra expandir APELIDOS_MANUAIS quando necessário.
+    """
+    if not dicionario:
+        return None
+    chave_busca = chave_canonica(nome_time)
+    for chave_dict, valor in dicionario.items():
+        if times_equivalentes(chave_busca, chave_dict):
+            return valor
+    print(f"Aviso [{contexto}]: não achei correspondência pra '{nome_time}' (chave: '{chave_busca}'). Chaves disponíveis: {list(dicionario.keys())[:5]}...")
+    return None
+
 # ==========================================
-# 2. FBREF WEB SCRAPING
+# 3. FBREF WEB SCRAPING (xG, cartões, escanteios)
 # ==========================================
 def raspar_dados_fbref(liga):
     link = MAPA_LIGAS_FBREF.get(liga)
     if not link: return {}
-    
+
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
         time.sleep(3)
@@ -83,33 +166,26 @@ def raspar_dados_fbref(liga):
         df = tabelas[0]
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(0)
-            
+
         dados_avancados = {}
         for _, linha in df.iterrows():
             if 'Squad' not in linha: continue
-            nome_time = limpar_nome_time(str(linha['Squad']))
+            nome_time = str(linha['Squad'])
             xg = linha.get('xG', 'N/A')
             xg_contra = linha.get('xGA', 'N/A')
             amarelos = linha.get('CrdY', 'N/A')
             vermelhos = linha.get('CrdR', 'N/A')
-            
-            dados_avancados[nome_time] = f"xG Pró: {xg} | xG Contra: {xg_contra} | Cartões(Amarelos/Vermelhos): {amarelos}/{vermelhos}"
-            
+
+            resumo = f"xG Pró: {xg} | xG Contra: {xg_contra} | Cartões(Amarelos/Vermelhos): {amarelos}/{vermelhos}"
+            dados_avancados[chave_canonica(nome_time)] = resumo
+
         return dados_avancados
     except Exception as e:
         print(f"Aviso: falha ao raspar FBref para {liga}: {e}")
         return {}
 
-def encontrar_fbref_time(dados_fbref, nome_time):
-    if not dados_fbref: return "Sem dados táticos avançados"
-    nome_limpo = limpar_nome_time(nome_time)
-    for nome_tabela, resumo in dados_fbref.items():
-        if nome_limpo in nome_tabela or nome_tabela in nome_limpo:
-            return resumo
-    return "Dados avançados não localizados"
-
 # ==========================================
-# 3. FUNÇÕES DE DADOS EXTERNOS (APIs)
+# 4. TABELA/FORMA (football-data.org)
 # ==========================================
 def buscar_tabela_competicao(codigo_competicao):
     if not FOOTBALL_DATA_API_KEY or not codigo_competicao: return {}
@@ -135,18 +211,15 @@ def buscar_tabela_competicao(codigo_competicao):
                     f"Saldo: {time_dados['goalDifference']} | Média Gols Pró: {media_pro} | "
                     f"Média Gols Contra: {media_contra} | Forma Recente: {forma}"
                 )
-                tabela[limpar_nome_time(nome)] = resumo
+                tabela[chave_canonica(nome)] = resumo
         return tabela
     except Exception as e:
+        print(f"Aviso: falha ao buscar tabela football-data ({codigo_competicao}): {e}")
         return {}
 
-def encontrar_resumo_time(tabela, nome_time):
-    if not tabela: return "Sem dados de tabela"
-    nome_limpo = limpar_nome_time(nome_time)
-    for nome_tabela, resumo in tabela.items():
-        if nome_limpo in nome_tabela or nome_tabela in nome_limpo: return resumo
-    return "Time não localizado na tabela"
-
+# ==========================================
+# 5. ÁRBITRO E CIDADE (API-Football)
+# ==========================================
 def buscar_fixtures_api_football(id_liga_api_football, data_str):
     if not APIFOOTBALL_KEY or not id_liga_api_football: return {}
     url = "https://v3.football.api-sports.io/fixtures"
@@ -154,38 +227,51 @@ def buscar_fixtures_api_football(id_liga_api_football, data_str):
     params = {"league": id_liga_api_football, "season": temporada_atual(), "date": data_str}
 
     try:
-        time.sleep(2) 
+        time.sleep(2)
         resposta = requests.get(url, headers=headers, params=params, timeout=10)
         resposta.raise_for_status()
         dados = resposta.json()
+
+        # DEBUG: mostra explicitamente se a API recusou a chave (401/403)
+        # ou apenas não encontrou jogos pra essa combinação liga+data.
+        if dados.get("errors"):
+            print(f"Aviso API-Football (liga {id_liga_api_football}, {data_str}): erro retornado pela API: {dados['errors']}")
+            return {}
+
         mapa_jogos = {}
         for item in dados.get("response", []):
-            time_casa = limpar_nome_time(item["teams"]["home"]["name"])
-            time_fora = limpar_nome_time(item["teams"]["away"]["name"])
+            time_casa = item["teams"]["home"]["name"]
+            time_fora = item["teams"]["away"]["name"]
             arbitro = item["fixture"].get("referee") or "não informado"
             cidade = item["fixture"]["venue"].get("city") or None
-            chave = f"{time_casa}_vs_{time_fora}"
+            chave = f"{chave_canonica(time_casa)}_vs_{chave_canonica(time_fora)}"
             mapa_jogos[chave] = {"arbitro": arbitro, "cidade": cidade}
+
+        if not mapa_jogos:
+            print(f"Aviso API-Football (liga {id_liga_api_football}, {data_str}): chamada OK mas 0 jogos retornados.")
         return mapa_jogos
+    except requests.exceptions.HTTPError as e:
+        print(f"Erro HTTP na API-Football (liga {id_liga_api_football}, {data_str}): {e} — resposta: {resposta.text[:300]}")
+        return {}
     except Exception as e:
+        print(f"Aviso: falha ao buscar fixtures API-Football (liga {id_liga_api_football}, {data_str}): {e}")
         return {}
 
 def encontrar_extras_jogo(mapa_fixtures, home_team, away_team):
     if not mapa_fixtures: return {"arbitro": "não disponível", "cidade": None}
-    home_clean = limpar_nome_time(home_team)
-    away_clean = limpar_nome_time(away_team)
-    
-    chave_limpa = f"{home_clean}_vs_{away_clean}"
-    if chave_limpa in mapa_fixtures: return mapa_fixtures[chave_limpa]
-        
+    home_c, away_c = chave_canonica(home_team), chave_canonica(away_team)
     for chave, valor in mapa_fixtures.items():
-        if home_clean in chave and away_clean in chave: return valor
+        if home_c in chave and away_c in chave:
+            return valor
     return {"arbitro": "não localizado", "cidade": None}
 
+# ==========================================
+# 6. CLIMA (OpenWeatherMap)
+# ==========================================
 def buscar_clima(cidade, cache_clima):
     if not APIOPENWEATHER_KEY or not cidade: return "Clima: não disponível"
     if cidade in cache_clima: return cache_clima[cidade]
-    
+
     url = "https://api.openweathermap.org/data/2.5/weather"
     params = {"q": cidade, "appid": APIOPENWEATHER_KEY, "units": "metric", "lang": "pt_br"}
     try:
@@ -196,14 +282,18 @@ def buscar_clima(cidade, cache_clima):
         descricao = dados["weather"][0]["description"]
         vento = dados["wind"]["speed"]
         resultado = f"{cidade}: {temp}°C, {descricao}, vento {vento}m/s"
+    except requests.exceptions.HTTPError as e:
+        print(f"Erro HTTP no OpenWeatherMap (cidade {cidade}): {e} — resposta: {resposta.text[:300]}")
+        resultado = f"Clima de {cidade}: não disponível"
     except Exception as e:
+        print(f"Aviso: falha ao buscar clima de {cidade}: {e}")
         resultado = f"Clima de {cidade}: não disponível"
 
     cache_clima[cidade] = resultado
     return resultado
 
 # ==========================================
-# 4. FUNÇÃO: BUSCAR JOGOS E ODDS (OTIMIZADA)
+# 7. FUNÇÃO: BUSCAR JOGOS E ODDS (COM DADOS DE TODAS AS FONTES)
 # ==========================================
 def buscar_jogos_do_dia():
     jogos_disponiveis = []
@@ -215,7 +305,7 @@ def buscar_jogos_do_dia():
         if codigo_fd and codigo_fd not in tabelas_cache:
             tabelas_cache[codigo_fd] = buscar_tabela_competicao(codigo_fd)
         tabela_liga = tabelas_cache.get(codigo_fd, {})
-        
+
         if liga not in fbref_cache:
             fbref_cache[liga] = raspar_dados_fbref(liga)
         fbref_liga = fbref_cache.get(liga, {})
@@ -234,16 +324,15 @@ def buscar_jogos_do_dia():
                 data_jogo = datetime.strptime(jogo['commence_time'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).date()
                 diferenca_dias = (data_jogo - hoje_utc).days
 
-                if 0 <= diferenca_dias <= 1:  
+                if 0 <= diferenca_dias <= 1:
                     bookmakers = jogo.get('bookmakers', [])
                     if bookmakers:
                         bm = next((b for b in bookmakers if b['key'] == 'betano'), bookmakers[0])
-                        
+
                         odds_str_list = []
                         for market in bm['markets']:
                             m_key = market['key'].upper()
                             outcomes_list = []
-                            # Otimização: Restringe às 6 primeiras linhas para proteger a cota de tokens da IA
                             for o in market['outcomes'][:6]:
                                 name = o.get('name', '')
                                 point = f" {o.get('point')}" if o.get('point') is not None else ""
@@ -251,12 +340,12 @@ def buscar_jogos_do_dia():
                                 outcomes_list.append(f"{name}{point}: {price}")
                             odds_str_list.append(f"[{m_key}] {' / '.join(outcomes_list)}")
                         odds_finais = " | ".join(odds_str_list)
-                        
-                        resumo_casa = encontrar_resumo_time(tabela_liga, jogo['home_team'])
-                        resumo_fora = encontrar_resumo_time(tabela_liga, jogo['away_team'])
-                        
-                        fbref_casa = encontrar_fbref_time(fbref_liga, jogo['home_team'])
-                        fbref_fora = encontrar_fbref_time(fbref_liga, jogo['away_team'])
+
+                        resumo_casa = buscar_em_dicionario(tabela_liga, jogo['home_team'], "tabela-casa") or "Sem dados de tabela"
+                        resumo_fora = buscar_em_dicionario(tabela_liga, jogo['away_team'], "tabela-fora") or "Sem dados de tabela"
+
+                        fbref_casa = buscar_em_dicionario(fbref_liga, jogo['home_team'], "fbref-casa") or "Sem dados táticos avançados"
+                        fbref_fora = buscar_em_dicionario(fbref_liga, jogo['away_team'], "fbref-fora") or "Sem dados táticos avançados"
 
                         data_str = data_jogo.isoformat()
                         chave_cache_fixture = (id_liga_af, data_str)
@@ -278,16 +367,20 @@ def buscar_jogos_do_dia():
                         )
                         jogos_disponiveis.append(info_jogo)
         except Exception as e:
+            print(f"Erro ao buscar liga {liga}: {e}")
             continue
+
+    print(f"Total de jogos encontrados: {len(jogos_disponiveis)}")
 
     LIMITE_MAXIMO_JOGOS = 30
     if len(jogos_disponiveis) > LIMITE_MAXIMO_JOGOS:
+        print(f"Aviso: {len(jogos_disponiveis)} jogos encontrados, cortando para os primeiros {LIMITE_MAXIMO_JOGOS}.")
         jogos_disponiveis = jogos_disponiveis[:LIMITE_MAXIMO_JOGOS]
 
     return "\n".join(jogos_disponiveis)
 
 # ==========================================
-# 5. FUNÇÃO: ANALISAR COM IA 
+# 8. FUNÇÃO: ANALISAR COM IA
 # ==========================================
 def analisar_com_ia_unificada(lista_de_jogos):
     if not lista_de_jogos: return "Nenhum jogo encontrado."
@@ -327,32 +420,34 @@ def analisar_com_ia_unificada(lista_de_jogos):
     ultimo_erro = None
     for i, key in enumerate(GEMINI_KEYS):
         try:
+            print(f"Tentando conexão com Gemini na Chave #{i+1}...")
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
                 model='gemini-3.6-flash',
                 contents=prompt_master,
                 config=types.GenerateContentConfig(temperature=0.2)
             )
+            print(f"Sucesso com a Chave #{i+1}.")
             return response.text
         except Exception as e:
+            print(f"Erro com a Chave #{i+1}: {e}")
             ultimo_erro = e
             continue
 
     return f"Erro crítico: Todas as chaves falharam. Último erro: {ultimo_erro}"
 
 # ==========================================
-# 6. FUNÇÃO: ENVIAR PARA O TELEGRAM (ANTI-CORTE)
+# 9. FUNÇÃO: ENVIAR PARA O TELEGRAM (ANTI-CORTE)
 # ==========================================
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
     pedacos = [mensagem[i:i+4000] for i in range(0, len(mensagem), 4000)]
-    
+
     for pedaco in pedacos:
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": pedaco, "parse_mode": "Markdown"}
         try:
             requests.post(url, json=payload).raise_for_status()
-            time.sleep(1) 
+            time.sleep(1)
         except requests.exceptions.RequestException:
             payload_sem_formato = {"chat_id": TELEGRAM_CHAT_ID, "text": pedaco}
             try:
@@ -362,7 +457,7 @@ def enviar_telegram(mensagem):
                 print(f"Erro ao enviar pedaço para o Telegram: {e}")
 
 # ==========================================
-# 7. EXECUÇÃO PRINCIPAL
+# 10. EXECUÇÃO PRINCIPAL
 # ==========================================
 if __name__ == "__main__":
     print("Iniciando varredura tática...")
