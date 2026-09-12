@@ -29,6 +29,15 @@ GEMINI_KEYS = [
 ]
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
 
+# Modelo pra geração de texto normal (Etapa 1, formatação de fallback).
+MODEL_PADRAO = "gemini-3.6-flash"
+# Modelo específico pra chamadas com Google Search (Etapa 2). No free tier,
+# grounding só está disponível em gemini-2.5-flash / gemini-2.5-flash-lite —
+# a família 3.x não tem grounding gratuito, é por isso que as 6 chaves
+# (mesmo de contas diferentes) falhavam igual. Se um dia isso mudar de novo
+# (ou você ativar billing), pode voltar pro MODEL_PADRAO aqui.
+MODEL_GROUNDING = os.getenv("MODEL_GROUNDING", "gemini-2.5-flash").strip()
+
 LIGAS = [
     "soccer_epl", "soccer_uefa_champs_league", "soccer_brazil_campeonato",
     "soccer_spain_la_liga", "soccer_italy_serie_a", "soccer_germany_bundesliga",
@@ -310,7 +319,7 @@ def analisar_com_ia_candidata(lista_de_jogos):
             print(f"[Etapa 1] Conectando Gemini (Chave {key[-4:]})...")
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model=MODEL_PADRAO,
                 contents=prompt_master,
                 config=types.GenerateContentConfig(temperature=0.2)
             )
@@ -335,9 +344,20 @@ def extrair_candidata(resposta):
 #    (agora focada só no que os dados estruturados NÃO cobrem:
 #    desfalques de última hora e confrontos diretos recentes)
 # ==========================================
+# Agora que a Etapa 2 usa MODEL_GROUNDING (gemini-2.5-flash) em vez do
+# gemini-3.6-flash pra chamada com busca, o default volta a ser "true".
+# Se voltar a falhar nas 6 chaves mesmo assim, o fallback formatado cobre
+# (não quebra o envio) — mas nesse caso defina GROUNDING_ATIVO=false pra não
+# gastar 6 tentativas à toa até investigar de novo.
+GROUNDING_ATIVO = os.getenv("GROUNDING_ATIVO", "true").strip().lower() == "true"
+
 def refinar_com_google_search(bilhete_candidato, jogos_escolhidos):
     if not jogos_escolhidos:
         return bilhete_candidato
+
+    if not GROUNDING_ATIVO:
+        print("[Etapa 2] GROUNDING_ATIVO=false — pulando busca, indo direto pro fallback formatado.")
+        return formatar_fallback_sem_busca(bilhete_candidato, foi_erro_de_quota=False)
 
     lista_jogos_str = ", ".join([f"{j.get('home')} vs {j.get('away')}" for j in jogos_escolhidos])
 
@@ -375,10 +395,10 @@ def refinar_com_google_search(bilhete_candidato, jogos_escolhidos):
     ultimo_erro_foi_quota = False
     for key in GEMINI_KEYS:
         try:
-            print(f"[Etapa 2] Ativando Agente com Google Search (Chave {key[-4:]})...")
+            print(f"[Etapa 2] Ativando Agente com Google Search (Chave {key[-4:]}, modelo {MODEL_GROUNDING})...")
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model=MODEL_GROUNDING,
                 contents=prompt_refinamento,
                 config=types.GenerateContentConfig(
                     temperature=0.3,
@@ -424,7 +444,7 @@ def formatar_fallback_sem_busca(bilhete_candidato, foi_erro_de_quota):
         try:
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model=MODEL_PADRAO,
                 contents=prompt_fallback,
                 config=types.GenerateContentConfig(temperature=0.1)
             )
@@ -603,4 +623,4 @@ if __name__ == "__main__":
 
     enviar_telegram(bilhete_final.strip())
     registrar_bilhete(escolhidos)
-    print("\nConcluído!")
+    print("\nConcluído!") 
